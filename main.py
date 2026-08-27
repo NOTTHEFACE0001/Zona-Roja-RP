@@ -335,7 +335,7 @@ async def on_ready():
     print(f'✅ Conectado como {bot.user.name}')
     await bot.change_presence(activity=discord.Game(name="Moderando Zona Roja RP 🇨🇱"))
 
-    guild = discord.Object(id=ID_SERVIDOR)
+    guild = discord.Object(id=1486083692089704619)
     try:
         print("🔄 Sincronizando comandos Slash...")
         bot.tree.copy_global_to(guild=guild)
