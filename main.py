@@ -34,10 +34,9 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 LOGO_URL    = "PON_AQUI_LA_URL_DEL_LOGO_NUEVO"  # 👈 sube el logo de Zona Roja RP a un canal de Discord (como con las otras imágenes) y pega el link aquí
-IMG_APERTURA = "https://cdn.discordapp.com/attachments/1497999534759084032/1503081674538221568/Captura_de_pantalla_2026-05-10_125245.jpg"
-IMG_CIERRE   = "https://cdn.discordapp.com/attachments/1497999534759084032/1503082415990636727/Captura_de_pantalla_2026-05-10_125631.jpg"
-IMG_ENCUESTA = "https://cdn.discordapp.com/attachments/1497999534759084032/1503084596177277080/Captura_de_pantalla_2026-05-07_211448.jpg"
-
+IMG_APERTURA = "https://cdn.discordapp.com/attachments/1487136038496239870/1541921962060812349/ChatGPT_Image_25_ago_2026_17_27_14.png?ex=6a91547b&is=6a9002fb&hm=c382fc8fdeadbe41edf54dfc71dabad7ed16af5c052b8b0d0c42ce0b1ca5b000&"
+IMG_CIERRE   = "https://cdn.discordapp.com/attachments/1487136038496239870/1541922295948513310/image.png?ex=6a9154ca&is=6a90034a&hm=39bae47e7bffe04776e0498ff3ce77519b1360b5525794f3c10472a31cc67b68&"
+IMG_ENCUESTA = "https://cdn.discordapp.com/attachments/1487136038496239870/1541922652170752050/ChatGPT_Image_25_ago_2026_17_30_07.png?ex=6a91551f&is=6a90039f&hm=fec1f3d22cc3213e9a9316099a55ee295670576860ecb16e26f407e160f2d37b&"
 ID_SERVIDOR = 1486083692089704619
 
 # 🎨 Identidad visual de Zona Roja RP
