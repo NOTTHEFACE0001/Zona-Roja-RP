@@ -11,6 +11,7 @@ import uuid
 import time
 import aiohttp
 from datetime import timezone
+from urllib.parse import urlparse
 
 # ─────────────────────────────────────────────
 #  KEEP ALIVE
@@ -37,11 +38,33 @@ LOGO_URL    = "PON_AQUI_LA_URL_DEL_LOGO_NUEVO"  # 👈 sube el logo de Zona Roja
 IMG_APERTURA = "https://cdn.discordapp.com/attachments/1487136038496239870/1541921962060812349/ChatGPT_Image_25_ago_2026_17_27_14.png?ex=6a91547b&is=6a9002fb&hm=c382fc8fdeadbe41edf54dfc71dabad7ed16af5c052b8b0d0c42ce0b1ca5b000&"
 IMG_CIERRE   = "https://cdn.discordapp.com/attachments/1487136038496239870/1541922295948513310/image.png?ex=6a9154ca&is=6a90034a&hm=39bae47e7bffe04776e0498ff3ce77519b1360b5525794f3c10472a31cc67b68&"
 IMG_ENCUESTA = "https://cdn.discordapp.com/attachments/1487136038496239870/1541922652170752050/ChatGPT_Image_25_ago_2026_17_30_07.png?ex=6a91551f&is=6a90039f&hm=fec1f3d22cc3213e9a9316099a55ee295670576860ecb16e26f407e160f2d37b&"
+
 ID_SERVIDOR = 1486083692089704619
 
 # 🎨 Identidad visual de Zona Roja RP
 COLOR_MARCA = 0x990000  # Rojo oscuro — reemplaza el rojo/azul/blanco de antes
 CREDIT_MSG  = "🔒 *Bot desarrollado por NOT THE FACE — prohibida su copia o reventa sin autorización.*"  # 👈 cambia el texto si usas otra frase
+
+# ─────────────────────────────────────────────
+#  VALIDACIÓN DE URLS (evita el 400 Bad Request de Discord)
+# ─────────────────────────────────────────────
+def url_valida(url) -> str | None:
+    """
+    Devuelve la URL solo si tiene un formato que Discord acepta
+    (esquema http/https + dominio). Si viene vacía, None, o mal
+    formada, devuelve None para que el embed simplemente omita
+    ese thumbnail/imagen/icono en vez de romper todo el formulario.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    url = url.strip()
+    try:
+        partes = urlparse(url)
+        if partes.scheme in ("http", "https") and partes.netloc:
+            return url
+    except Exception:
+        pass
+    return None
 
 # ─────────────────────────────────────────────
 #  ROBLOX API
@@ -197,12 +220,12 @@ def construir_embed_dni(datos, usuario_nombre, discord_avatar_url):
         color=COLOR_MARCA,
         timestamp=datetime.datetime.utcnow()
     )
-    embed.set_author(name="Zona Roja RP — Registro Civil", icon_url=LOGO_URL)
-    embed.set_thumbnail(url=LOGO_URL)
+    embed.set_author(name="Zona Roja RP — Registro Civil", icon_url=url_valida(LOGO_URL))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
 
     # Avatar de Roblox como imagen grande si está disponible
-    if datos.get("roblox_avatar_url"):
-        embed.set_image(url=datos["roblox_avatar_url"])
+    if url_valida(datos.get("roblox_avatar_url")):
+        embed.set_image(url=url_valida(datos["roblox_avatar_url"]))
 
     embed.add_field(name="👤 Nombre completo",    value=f"`{datos['nombre']} {datos['apellido']}`",  inline=True)
     embed.add_field(name="🎮 Usuario Roblox",     value=f"`{datos['nombre_roblox']}`",               inline=True)
@@ -229,7 +252,7 @@ def construir_embed_dni(datos, usuario_nombre, discord_avatar_url):
     )
     embed.set_footer(
         text=f"Cédula de {usuario_nombre} • Zona Roja RP",
-        icon_url=discord_avatar_url
+        icon_url=url_valida(discord_avatar_url)
     )
     return embed
 
@@ -335,7 +358,7 @@ async def on_ready():
     print(f'✅ Conectado como {bot.user.name}')
     await bot.change_presence(activity=discord.Game(name="Moderando Zona Roja RP 🇨🇱"))
 
-    guild = discord.Object(id=1486083692089704619)
+    guild = discord.Object(id=ID_SERVIDOR)
     try:
         print("🔄 Sincronizando comandos Slash...")
         bot.tree.copy_global_to(guild=guild)
@@ -588,8 +611,8 @@ async def sancionar(
     embed.add_field(name="📊 Total sanciones", value=f"`{total}`",             inline=True)
     if prueba:
         embed.add_field(name="🔗 Evidencia",   value=f"[Ver prueba]({prueba})", inline=False)
-        if prueba.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
-            embed.set_image(url=prueba)
+        if prueba.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")) and url_valida(prueba):
+            embed.set_image(url=url_valida(prueba))
     embed.set_footer(text=f"Servidor: {interaction.guild.name}")
     await interaction.followup.send(embed=embed)
 
@@ -873,10 +896,10 @@ async def anuncio(
         color=cfg["color"],
         timestamp=datetime.datetime.now(timezone.utc)
     )
-    embed.set_author(name=f"Zona Roja Roleplay — {cfg['label']}", icon_url=LOGO_URL)
-    embed.set_thumbnail(url=LOGO_URL)
-    if imagen:
-        embed.set_image(url=imagen)
+    embed.set_author(name=f"Zona Roja Roleplay — {cfg['label']}", icon_url=url_valida(LOGO_URL))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    if url_valida(imagen):
+        embed.set_image(url=url_valida(imagen))
     embed.set_footer(
         text=f"{cfg['footer']} • Publicado por {interaction.user.display_name}",
         icon_url=interaction.user.display_avatar.url
@@ -934,9 +957,9 @@ async def abrir(interaction: discord.Interaction, horario_cierre: str, modo: str
         ),
         inline=False
     )
-    embed.set_image(url=IMG_APERTURA)
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=LOGO_URL)
+    embed.set_image(url=url_valida(IMG_APERTURA))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=url_valida(LOGO_URL))
 
     await interaction.response.send_message(content="@everyone", embed=embed)
 
@@ -959,9 +982,9 @@ async def cerrar(interaction: discord.Interaction, motivo: str = "Fin de sesión
         value="▸ Guardamos tu progreso automáticamente.\n▸ ¡Vuelve pronto para la próxima sesión!",
         inline=False
     )
-    embed.set_image(url=IMG_CIERRE)
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=LOGO_URL)
+    embed.set_image(url=url_valida(IMG_CIERRE))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=url_valida(LOGO_URL))
     await interaction.response.send_message(content="@everyone", embed=embed)
 
 
@@ -985,8 +1008,8 @@ async def pausar(interaction: discord.Interaction, duracion: str, motivo: str = 
         value="▸ Puedes usar los canales de OOC.\n▸ No abandones el servidor.\n▸ Espera el aviso de reanudación.",
         inline=False
     )
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=LOGO_URL)
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=url_valida(LOGO_URL))
     await interaction.response.send_message(content="@everyone", embed=embed)
 
 
@@ -1000,8 +1023,8 @@ async def reanudar(interaction: discord.Interaction):
     )
     embed.add_field(name="🕒 HORA DE REANUDACIÓN", value=f"<t:{int(time.time())}:t>", inline=True)
     embed.add_field(name="🎙️ REANUDADO POR",       value=interaction.user.mention,    inline=True)
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=LOGO_URL)
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=url_valida(LOGO_URL))
     await interaction.response.send_message(content="@everyone", embed=embed)
 
 
@@ -1035,8 +1058,8 @@ async def emergencia(interaction: discord.Interaction, tipo: str, descripcion: s
         ),
         inline=False
     )
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=LOGO_URL)
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=url_valida(LOGO_URL))
     await interaction.response.send_message(content="@everyone 🚨", embed=embed)
 
 
@@ -1069,8 +1092,8 @@ async def evento(
         value="▸ Preséntate a tiempo.\n▸ Sigue las reglas del evento.\n▸ ¡Diviértete!",
         inline=False
     )
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=LOGO_URL)
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=url_valida(LOGO_URL))
 
     view = discord.ui.View()
     view.add_item(discord.ui.Button(
@@ -1096,9 +1119,9 @@ async def votar(interaction: discord.Interaction, hora_propuesta: str = "Por def
     )
     embed.add_field(name="🎙️ PROPUESTO POR", value=interaction.user.mention, inline=True)
     embed.add_field(name="🌐 SERVIDOR",       value="Zona Roja RP 🇨🇱",      inline=True)
-    embed.set_image(url=IMG_ENCUESTA)
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=LOGO_URL)
+    embed.set_image(url=url_valida(IMG_ENCUESTA))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="ZRRP System • Zona Roja RP", icon_url=url_valida(LOGO_URL))
 
     await interaction.response.send_message(embed=embed)
     msg = await interaction.original_response()
