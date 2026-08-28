@@ -256,6 +256,60 @@ def construir_embed_dni(datos, usuario_nombre, discord_avatar_url):
     )
     return embed
 
+def generar_firma(texto: str) -> str:
+    """Convierte un texto a estilo cursivo (Unicode Bold Script) para simular una firma manuscrita."""
+    resultado = []
+    for ch in texto:
+        if 'A' <= ch <= 'Z':
+            resultado.append(chr(ord(ch) - ord('A') + 0x1D4D0))
+        elif 'a' <= ch <= 'z':
+            resultado.append(chr(ord(ch) - ord('a') + 0x1D4EA))
+        else:
+            resultado.append(ch)
+    return "".join(resultado)
+
+def construir_embed_reverso_dni(datos, usuario_nombre, discord_avatar_url):
+    """
+    Construye el REVERSO de la cédula: firma del titular, código de verificación
+    y datos legales/autoridad emisora — para mostrarse junto al frente.
+    """
+    codigo_verificacion = f"{datos['rut'].replace('.', '').replace('-', '')}-ZRRP-{datos.get('roblox_id', '0')}"
+    nombre_completo = f"{datos['nombre']} {datos['apellido']}"
+
+    embed = discord.Embed(
+        title="🪪  REVERSO — CÉDULA DE IDENTIDAD",
+        color=COLOR_MARCA,
+        timestamp=datetime.datetime.utcnow()
+    )
+    embed.set_author(name="Zona Roja RP — Registro Civil", icon_url=url_valida(LOGO_URL))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+
+    embed.add_field(
+        name="✍️ Firma del titular",
+        value=f"```{generar_firma(nombre_completo)}```",
+        inline=False
+    )
+    embed.add_field(name="🔢 Código de verificación", value=f"`{codigo_verificacion}`", inline=False)
+    embed.add_field(
+        name="🏛️ Autoridad emisora",
+        value="Registro Civil e Identificación — Zona Roja RP",
+        inline=False
+    )
+    embed.add_field(
+        name="\u200b",
+        value=(
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ *Documento de rol exclusivo para uso dentro del servidor. No representa una identificación real.*\n"
+            f"{CREDIT_MSG}"
+        ),
+        inline=False
+    )
+    embed.set_footer(
+        text=f"Reverso de la cédula de {usuario_nombre} • Zona Roja RP",
+        icon_url=url_valida(discord_avatar_url)
+    )
+    return embed
+
 # ─────────────────────────────────────────────
 #  HELPERS — SANCIONES
 # ─────────────────────────────────────────────
@@ -494,11 +548,12 @@ async def dni(
     }
 
     guardar_dni_db(interaction.user.id, datos_dni)
-    embed = construir_embed_dni(datos_dni, interaction.user.display_name, interaction.user.display_avatar.url)
+    embed_frente  = construir_embed_dni(datos_dni, interaction.user.display_name, interaction.user.display_avatar.url)
+    embed_reverso = construir_embed_reverso_dni(datos_dni, interaction.user.display_name, interaction.user.display_avatar.url)
 
     await interaction.channel.send(
         content=f"🎉 ¡Bienvenido/a a **Zona Roja RP**, {nombre}! Tu cédula ha sido creada y registrada.",
-        embed=embed
+        embeds=[embed_frente, embed_reverso]
     )
 
 
@@ -515,8 +570,9 @@ async def ver_dni(interaction: discord.Interaction, usuario: discord.Member = No
         )
         await interaction.response.send_message(msg, ephemeral=True)
         return
-    embed = construir_embed_dni(datos, objetivo.display_name, objetivo.display_avatar.url)
-    await interaction.response.send_message(embed=embed)
+    embed_frente  = construir_embed_dni(datos, objetivo.display_name, objetivo.display_avatar.url)
+    embed_reverso = construir_embed_reverso_dni(datos, objetivo.display_name, objetivo.display_avatar.url)
+    await interaction.response.send_message(embeds=[embed_frente, embed_reverso])
 
 
 @bot.tree.command(name="actualizar_dni", description="Actualiza tu foto de Roblox si ya tienes DNI registrado")
@@ -542,10 +598,11 @@ async def actualizar_dni(interaction: discord.Interaction, nuevo_usuario_roblox:
     datos["roblox_avatar_url"]= roblox_info["avatar_url"]
     guardar_dni_db(interaction.user.id, datos)
 
-    embed = construir_embed_dni(datos, interaction.user.display_name, interaction.user.display_avatar.url)
+    embed_frente  = construir_embed_dni(datos, interaction.user.display_name, interaction.user.display_avatar.url)
+    embed_reverso = construir_embed_reverso_dni(datos, interaction.user.display_name, interaction.user.display_avatar.url)
     await interaction.followup.send(
         content=f"✅ ¡DNI actualizado con el avatar de **{nuevo_usuario_roblox}**!",
-        embed=embed,
+        embeds=[embed_frente, embed_reverso],
         ephemeral=False
     )
 
