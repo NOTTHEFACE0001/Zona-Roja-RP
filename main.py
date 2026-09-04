@@ -2,9 +2,7 @@
 # Copyright (C) 2026 Junior (NOT THE FACE / Player.banned).
 # Todos los derechos reservados.
 #
-# El sistema de Registro Civil / Cédula de Identidad incluido en este
-# archivo (sección "REGISTRO CIVIL — CÉDULA DE IDENTIDAD" más abajo) es
-# propiedad intelectual exclusiva de:
+# Este sistema de DNI es propiedad intelectual exclusiva de:
 # - Nombre de Usuario (Discord/Plataformas): Player.banned
 # - Apodo Común: NOT THE FACE
 # - Nombre de Rol: Junior
@@ -13,76 +11,52 @@
 # distribución o replicación de este código y su lógica en otros
 # servidores sin el consentimiento explícito y por escrito del autor.
 # ----------------------------------------------------------------------
-"""
-LAS CONDES RP — BOT PRINCIPAL (archivo único)
 
-Incluye:
-  1) Apertura/cierre del servidor con encuesta de roles (/abrir, /cerrar, /estado)
-  2) Registro Civil — Cédula de Identidad (/crear-cedula, /ver-cedula, etc.)
-
-Para correrlo: python main.py
-"""
-
-import datetime
-import json
 import os
-import random
-import string
-from threading import Thread
-
-import aiohttp
 import discord
-from discord import app_commands
 from discord.ext import commands
-from dotenv import load_dotenv
+from discord import app_commands
 from flask import Flask
+from threading import Thread
+import datetime
+import random
+import json
+import uuid
+import time
+import aiohttp
+from datetime import timezone
+from urllib.parse import urlparse
 
-# ═════════════════════════════════════════════════════════════════════════
-#  ENTORNO / CONFIGURACIÓN GENERAL
-# ═════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────
+#  KEEP ALIVE
+# ─────────────────────────────────────────────
+flask_app = Flask('')
 
-load_dotenv()
+@flask_app.route('/')
+def home():
+    return "Bot Zona Roja RP está en línea 🟢"
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=8080)
 
-# Rol que se menciona al abrir la encuesta
-NOTIFY_ROLE_ID = int(os.getenv("NOTIFY_ROLE_ID", "1524900084297371768"))
+def keep_alive():
+    Thread(target=run_flask, daemon=True).start()
 
-# Rol de Staff autorizado para /abrir y /cerrar (0 = solo Administradores)
-STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0")) or None
+# ─────────────────────────────────────────────
+#  CONFIGURACIÓN DEL BOT
+# ─────────────────────────────────────────────
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Código de invitación del servidor -> discord.gg/<codigo>
-INVITE_CODE = os.getenv("INVITE_CODE", "WzMAg")
+LOGO_URL     = "https://cdn.discordapp.com/attachments/1498150124894031972/1520990016602378281/content.png"
+IMG_APERTURA = "https://cdn.discordapp.com/attachments/1487136038496239870/1541921962060812349/ChatGPT_Image_25_ago_2026_17_27_14.png?ex=6a91547b&is=6a9002fb&hm=c382fc8fdeadbe41edf54dfc71dabad7ed16af5c052b8b0d0c42ce0b1ca5b000&"
+IMG_CIERRE   = "https://cdn.discordapp.com/attachments/1487136038496239870/1541922295948513310/image.png?ex=6a9154ca&is=6a90034a&hm=39bae47e7bffe04776e0498ff3ce77519b1360b5525794f3c10472a31cc67b68&"
+IMG_ENCUESTA = "https://cdn.discordapp.com/attachments/1487136038496239870/1541922652170752050/ChatGPT_Image_25_ago_2026_17_30_07.png?ex=6a91551f&is=6a90039f&hm=fec1f3d22cc3213e9a9316099a55ee295670576860ecb16e26f407e160f2d37b&"
 
-# Meta de votos por defecto de la encuesta de apertura
-VOTE_GOAL_DEFAULT = int(os.getenv("VOTE_GOAL_DEFAULT", "6"))
+ID_SERVIDOR = 1486083692089704619
 
-# Logo del embed de apertura. El link de Discord CDN caduca (?ex=...), así
-# que si lo dejas vacío el bot simplemente no pone thumbnail en ese embed.
-THUMBNAIL_URL = os.getenv("THUMBNAIL_URL", "")
-
-EMBED_COLOR = 0x1F3A5F         # azul acorde al logo de Las Condes RP
-EMBED_COLOR_CIERRE = 0xC0392B  # rojo para el mensaje de cierre
-
-STATE_FILE = "poll_state.json"
-DB_FILE = "cedula_database.json"
-
-# Opciones de rol con sus emojis personalizados del servidor Las Condes RP
-ROLE_OPTIONS = [
-    {"label": "Carabineros de Chile", "emoji_name": "CarabinerosDeChile", "emoji_id": 1540566592285446195},
-    {"label": "PDI", "emoji_name": "PDI", "emoji_id": 1540567772210266212},
-    {"label": "SAMU", "emoji_name": "SAMU", "emoji_id": 1540566867415007323},
-    {"label": "Ciudadano", "emoji_name": "Ciudadano", "emoji_id": 1540566722287767655},
-    {"label": "Bomberos", "emoji_name": "BomberosChile", "emoji_id": 1540567027197157416},
-]
-
-VIP_ROLES = ["VIP", "Donador", "Donador+", "Staff", "Administrador", "Moderador", "Owner", "Dueño"]
-
-# Paleta bandera Chile 🇨🇱 (usada en las cédulas)
-COLOR_ROJO = 0xD52B1E
-COLOR_AZUL = 0x0033A0
-
-CREDIT_MSG = (
+COLOR_MARCA = 0x990000
+CREDIT_MSG  = (
     "\n```\n"
     "# ----------------------------------------------------------------------\n"
     "# Copyright (C) 2026 Junior (NOT THE FACE / Player.banned).\n"
@@ -100,166 +74,172 @@ CREDIT_MSG = (
     "```"
 )
 
-# ═════════════════════════════════════════════════════════════════════════
-#  KEEP-ALIVE (Render / Railway) — abre un puerto HTTP de salud
-# ═════════════════════════════════════════════════════════════════════════
-
-flask_app = Flask("las_condes_rp_bot")
-
-
-@flask_app.route("/")
-def home():
-    return "🇨🇱 Las Condes RP Bot — Online"
-
-
-def keep_alive():
-    def run():
-        port = int(os.environ.get("PORT", 8080))
-        flask_app.run(host="0.0.0.0", port=port)
-
-    Thread(target=run, daemon=True).start()
-
-
-# ═════════════════════════════════════════════════════════════════════════
-#  ESTADO DE LA ENCUESTA (persiste en un archivo JSON)
-# ═════════════════════════════════════════════════════════════════════════
-
-def load_state() -> dict:
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {
-        "status": "cerrado",
-        "message_id": None,
-        "channel_id": None,
-        "meta_votos": VOTE_GOAL_DEFAULT,
-        "hora_apertura": None,
-    }
-
-
-def save_state(state: dict):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f)
-
-
-state = load_state()
-
-# ═════════════════════════════════════════════════════════════════════════
-#  REGISTRO CIVIL — CÉDULA DE IDENTIDAD
-#  (ver aviso de derechos de autor al inicio del archivo)
-# ═════════════════════════════════════════════════════════════════════════
-
-# ── Base de datos JSON ──────────────────────────────────────────────────
-
-def load_db() -> dict:
-    if not os.path.exists(DB_FILE):
-        return {}
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_db(data: dict):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def get_cedula(uid: int) -> dict | None:
-    return load_db().get(str(uid))
-
-
-def set_cedula(uid: int, data: dict):
-    db = load_db()
-    db[str(uid)] = data
-    save_db(db)
-
-
-def del_cedula(uid: int):
-    db = load_db()
-    db.pop(str(uid), None)
-    save_db(db)
-
-
-# ── Utilidades ───────────────────────────────────────────────────────────
-
-def calcular_edad(fecha_str: str) -> int | None:
-    """Calcula edad exacta desde DD/MM/YYYY."""
-    try:
-        d, m, y = fecha_str.strip().split("/")
-        nac = datetime.date(int(y), int(m), int(d))
-        hoy = datetime.date.today()
-        return hoy.year - nac.year - ((hoy.month, hoy.day) < (nac.month, nac.day))
-    except Exception:
+# ─────────────────────────────────────────────
+#  VALIDACIÓN DE URLS
+# ─────────────────────────────────────────────
+def url_valida(url) -> str | None:
+    if not url or not isinstance(url, str):
         return None
-
-
-def generar_rut() -> str:
-    """Genera un RUT chileno simulado con dígito verificador correcto."""
-    num = random.randint(5_000_000, 25_000_000)
-    reversed_digits = [int(d) for d in reversed(str(num))]
-    factors = [2, 3, 4, 5, 6, 7]
-    total = sum(d * factors[i % 6] for i, d in enumerate(reversed_digits))
-    resto = 11 - (total % 11)
-    if resto == 11:
-        dv = "0"
-    elif resto == 10:
-        dv = "K"
-    else:
-        dv = str(resto)
-    s = str(num)
-    return f"{s[:-6]}.{s[-6:-3]}.{s[-3:]}-{dv}"
-
-
-def generar_num_serie() -> str:
-    """Genera número de serie de cédula chilena simulado."""
-    letra = random.choice(string.ascii_uppercase)
-    nums = "".join(random.choices(string.digits, k=9))
-    return f"{letra}{nums}"
-
-
-def barcode(seed: str) -> str:
-    random.seed(seed)
-    return "".join(random.choice(["█", "▌", "│", "▐", "║", "▏", "▎", "▊"]) for _ in range(38))
-
-
-async def get_roblox_avatar(username: str) -> str | None:
+    url = url.strip()
     try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(
+        partes = urlparse(url)
+        if partes.scheme in ("http", "https") and partes.netloc:
+            return url
+    except Exception:
+        pass
+    return None
+
+# ─────────────────────────────────────────────
+#  ROBLOX API
+# ─────────────────────────────────────────────
+async def obtener_info_roblox(username: str) -> dict | None:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
                 "https://users.roblox.com/v1/usernames/users",
-                json={"usernames": [username], "excludeBannedUsers": False},
-            ) as r:
-                if r.status != 200:
+                json={"usernames": [username], "excludeBannedUsers": False}
+            ) as resp:
+                if resp.status != 200:
                     return None
-                data = await r.json()
+                data = await resp.json()
                 users = data.get("data", [])
                 if not users:
                     return None
-                uid = users[0]["id"]
+                user_id      = users[0]["id"]
+                display_name = users[0].get("displayName", username)
 
-            async with s.get(
-                "https://thumbnails.roblox.com/v1/users/avatar-headshot"
-                f"?userIds={uid}&size=420x420&format=Png&isCircular=false"
-            ) as r:
-                if r.status != 200:
-                    return None
-                data = await r.json()
-                thumbs = data.get("data", [])
-                return thumbs[0].get("imageUrl") if thumbs else None
-    except Exception:
+            async with session.get(
+                f"https://thumbnails.roblox.com/v1/users/avatar-bust"
+                f"?userIds={user_id}&size=420x420&format=Png&isCircular=false"
+            ) as resp:
+                if resp.status != 200:
+                    return {"user_id": user_id, "display_name": display_name, "avatar_url": None}
+                thumb_data = await resp.json()
+                thumbs     = thumb_data.get("data", [])
+                avatar_url = thumbs[0]["imageUrl"] if thumbs else None
+
+            return {"user_id": user_id, "display_name": display_name, "avatar_url": avatar_url}
+    except Exception as e:
+        print(f"❌ Error Roblox API: {e}")
         return None
 
+# ─────────────────────────────────────────────
+#  BASE DE DATOS — DNI
+# ─────────────────────────────────────────────
+DB_FILE = "dnis.json"
 
-def tiene_vip(member: discord.Member) -> bool:
-    return any(r.name in VIP_ROLES for r in member.roles)
+def guardar_dni_db(user_id, datos):
+    try:
+        db = {}
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                db = json.load(f)
+        db[str(user_id)] = datos
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(db, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"❌ Error al guardar DNI: {e}")
 
+def obtener_dni_db(user_id):
+    try:
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get(str(user_id))
+        return None
+    except Exception as e:
+        print(f"❌ Error al leer DNI: {e}")
+        return None
 
-def logo(guild: discord.Guild | None) -> str | None:
-    """Usa el ícono del propio servidor como logo (evita URLs fijas, que caducan)."""
-    if guild and guild.icon:
-        return guild.icon.url
-    return None
+# ─────────────────────────────────────────────
+#  BASE DE DATOS — SANCIONES
+# ─────────────────────────────────────────────
+SANCIONES_FILE = "data/sanciones.json"
 
+def _cargar_db() -> dict:
+    if not os.path.exists(SANCIONES_FILE):
+        os.makedirs(os.path.dirname(SANCIONES_FILE), exist_ok=True)
+        return {}
+    with open(SANCIONES_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
+def _guardar_db(data: dict):
+    os.makedirs(os.path.dirname(SANCIONES_FILE), exist_ok=True)
+    with open(SANCIONES_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def _obtener_sanciones_usuario(guild_id: str, user_id: str) -> list:
+    return _cargar_db().get(guild_id, {}).get(user_id, [])
+
+def _guardar_sancion(guild_id: str, user_id: str, sancion: dict):
+    db = _cargar_db()
+    db.setdefault(guild_id, {}).setdefault(user_id, []).append(sancion)
+    _guardar_db(db)
+
+def _actualizar_sancion(guild_id: str, user_id: str, sancion_id: str, cambios: dict) -> bool:
+    db = _cargar_db()
+    for s in db.get(guild_id, {}).get(user_id, []):
+        if s["id"] == sancion_id:
+            s.update(cambios)
+            _guardar_db(db)
+            return True
+    return False
+
+def _eliminar_sancion(guild_id: str, user_id: str, sancion_id: str) -> bool:
+    db = _cargar_db()
+    sanciones = db.get(guild_id, {}).get(user_id, [])
+    nueva = [s for s in sanciones if s["id"] != sancion_id]
+    if len(nueva) == len(sanciones):
+        return False
+    db[guild_id][user_id] = nueva
+    _guardar_db(db)
+    return True
+
+# ─────────────────────────────────────────────
+#  HELPERS — DNI
+# ─────────────────────────────────────────────
+def generar_rut() -> str:
+    numero = random.randint(5_000_000, 25_000_000)
+    dv = calcular_dv(numero)
+    return f"{numero:,}".replace(",", ".") + "-" + str(dv)
+
+def calcular_dv(rut: int) -> str:
+    reversed_digits = [int(d) for d in reversed(str(rut))]
+    factors = [2, 3, 4, 5, 6, 7]
+    total = sum(d * factors[i % 6] for i, d in enumerate(reversed_digits))
+    remainder = 11 - (total % 11)
+    if remainder == 11: return "0"
+    elif remainder == 10: return "K"
+    return str(remainder)
+
+def calcular_edad(fecha_nacimiento: str) -> str:
+    try:
+        nacimiento = datetime.datetime.strptime(fecha_nacimiento, "%d/%m/%Y")
+        hoy = datetime.datetime.now()
+        edad = hoy.year - nacimiento.year - (
+            (hoy.month, hoy.day) < (nacimiento.month, nacimiento.day)
+        )
+        return str(edad)
+    except ValueError:
+        return "INVALIDA"
+
+def generar_firma(texto: str) -> str:
+    resultado = []
+    for ch in texto:
+        if 'A' <= ch <= 'Z':
+            resultado.append(chr(ord(ch) - ord('A') + 0x1D4D0))
+        elif 'a' <= ch <= 'z':
+            resultado.append(chr(ord(ch) - ord('a') + 0x1D4EA))
+        else:
+            resultado.append(ch)
+    return "".join(resultado)
+
+def barcode(seed: str) -> str:
+    random.seed(seed)
+    return "".join(random.choice(["█","▌","│","▐","║","▏","▎","▊"]) for _ in range(38))
+
+# ─────────────────────────────────────────────
+#  SESIÓN TEMPORAL
+# ─────────────────────────────────────────────
 class UserSession:
     _data: dict = {}
 
@@ -280,159 +260,169 @@ class UserSession:
     def clear(cls, uid: int):
         cls._data.pop(uid, None)
 
-
-# ── Embeds de la cédula ──────────────────────────────────────────────────
-
-def embed_frente(ced: dict, avatar_url: str | None, guild: discord.Guild | None) -> discord.Embed:
-    color_raw = ced.get("custom_color")
-    color = int(color_raw, 16) if color_raw else COLOR_AZUL
-
-    e = discord.Embed(color=color)
-    icon = logo(guild)
-    e.set_author(name="🇨🇱  REPÚBLICA DE CHILE  ·  CÉDULA DE IDENTIDAD", icon_url=icon)
-
-    e.description = (
-        "```ansi\n"
-        "\u001b[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m\n"
-        "\u001b[1;37mSERVICIO DE REGISTRO CIVIL E IDENTIFICACIÓN\u001b[0m\n"
-        "\u001b[0;36mLAS CONDES RP  ·  ROLEPLAY  ·  DOCUMENTO OFICIAL\u001b[0m\n"
-        "\u001b[0;31m★ ★ ★  FRENTE  ★ ★ ★\u001b[0m\n"
-        "\u001b[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m\n"
-        "```"
-    )
-
-    nombre = f"{ced['nombres']} {ced['apellidos']}"
-    e.add_field(name="👤  NOMBRES Y APELLIDOS", value=f"```{nombre.upper()}```", inline=False)
-    e.add_field(name="🪪  RUT", value=f"```{ced.get('rut', '—')}```", inline=True)
-    e.add_field(name="📅  FECHA DE NACIMIENTO", value=f"```{ced['fecha_nacimiento']}```", inline=True)
-    e.add_field(name="🔢  EDAD", value=f"```{ced['edad']} años```", inline=True)
-    e.add_field(name="⚧️  SEXO", value=f"```{ced['sexo']}```", inline=True)
-    e.add_field(name="🏙️  REGIÓN DE NACIMIENTO", value=f"```{ced['region_nacimiento']}```", inline=True)
-    e.add_field(name="🇨🇱  NACIONALIDAD", value="```CHILENO/A```", inline=True)
-    e.add_field(name="💼  OCUPACIÓN", value=f"```{ced['ocupacion']}```", inline=True)
-    e.add_field(name="🎮  USUARIO ROBLOX", value=f"```{ced['roblox_username']}```", inline=True)
-    e.add_field(name="📋  N° SERIE", value=f"```{ced.get('num_serie', '—')}```", inline=True)
-
-    if ced.get("lema"):
-        e.add_field(name="✨  LEMA PERSONAL", value=f"*\"{ced['lema']}\"*", inline=False)
-
-    exp_año = datetime.date.today().year + 5
-    e.set_footer(
-        text=f"📅 Vencimiento: {exp_año}  ·  SRCeI  ·  Las Condes RP\n"
-             f"🛡️ Sistema desarrollado por Player.banned (NOT THE FACE)  ·  © 2026",
-        icon_url=icon,
-    )
-
-    if avatar_url:
-        e.set_thumbnail(url=avatar_url)
-    if ced.get("banner_url"):
-        e.set_image(url=ced["banner_url"])
-
-    return e
-
-
-def embed_reverso(ced: dict, guild: discord.Guild | None) -> discord.Embed:
-    color_raw = ced.get("custom_color")
-    color = int(color_raw, 16) if color_raw else COLOR_ROJO
-
-    e = discord.Embed(color=color)
-    icon = logo(guild)
-    e.set_author(name="🇨🇱  REGISTRO CIVIL — REVERSO DE CÉDULA  ·  LAS CONDES RP", icon_url=icon)
-
-    e.description = (
-        "```ansi\n"
-        "\u001b[0;31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m\n"
-        "\u001b[1;37mDATOS COMPLEMENTARIOS\u001b[0m\n"
-        "\u001b[0;33mREVERSO  ·  LAS CONDES RP  ·  SRCeI\u001b[0m\n"
-        "\u001b[0;31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m\n"
-        "```"
-    )
-
-    e.add_field(name="💑  ESTADO CIVIL", value=f"```{ced.get('estado_civil', '—')}```", inline=True)
-    e.add_field(name="🩸  GRUPO SANGUÍNEO", value=f"```{ced.get('tipo_sangre', '—')}```", inline=True)
-    e.add_field(name="🪪  RUT", value=f"```{ced.get('rut', '—')}```", inline=True)
-
-    mrz1 = f"IDCHL{ced.get('rut', '000000000').replace('.', '').replace('-', ''):20}"
-    mrz2 = f"{ced['fecha_nacimiento'].replace('/', '')}{ced['sexo'][0].upper()}{''.join(random.choices(string.digits, k=7))}"
-    nombre_apellido = f"{ced['apellidos'].upper()[:10]}<<{ced['nombres'].upper()[:10]}"
-    e.add_field(
-        name="🔍  MRZ — ZONA LEGIBLE POR MÁQUINA",
-        value=f"```\n{mrz1[:30]}\n{mrz2[:30]}\n{nombre_apellido[:30]}\n```",
-        inline=False,
-    )
-
-    e.add_field(
-        name="▦  CÓDIGO DE BARRAS PDF417",
-        value=f"```{barcode(ced.get('rut', 'LASCONDESRP'))}```",
-        inline=False,
-    )
-
-    e.add_field(
-        name="✍️  FIRMAS DE AUTORIDAD",
-        value=(
-            "```\n"
-            f"Director SRCeI (RP):        {'_' * 22}\n"
-            f"Oficial de Registro Civil:  {'_' * 22}\n"
-            f"Autoridad Las Condes RP:    {'_' * 22}\n"
+# ─────────────────────────────────────────────
+#  EMBEDS DNI
+# ─────────────────────────────────────────────
+def construir_embed_frente(datos, usuario_nombre, discord_avatar_url):
+    embed = discord.Embed(
+        title="🪪  CÉDULA DE IDENTIDAD — LA ZONA ROJA RP",
+        description=(
+            "```ansi\n"
+            "\u001b[0;31m┌─────────────────────────────────────────────┐\u001b[0m\n"
+            "\u001b[0;31m│\u001b[0m  \u001b[1;37mREPÚBLICA DE CHILE — LA ZONA ROJA RP\u001b[0m       \u001b[0;31m│\u001b[0m\n"
+            "\u001b[0;31m│\u001b[0m  \u001b[0;33mREGISTRO CIVIL E IDENTIFICACIÓN — LZRRP\u001b[0m    \u001b[0;31m│\u001b[0m\n"
+            "\u001b[0;31m│\u001b[0m  \u001b[0;31m★ ★ ★  F R E N T E  ★ ★ ★\u001b[0m                \u001b[0;31m│\u001b[0m\n"
+            "\u001b[0;31m└─────────────────────────────────────────────┘\u001b[0m\n"
             "```"
         ),
-        inline=False,
+        color=COLOR_MARCA,
+        timestamp=datetime.datetime.utcnow()
     )
+    embed.set_author(name="La Zona Roja RP — Registro Civil", icon_url=url_valida(LOGO_URL))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
 
-    e.add_field(
-        name="⚖️  AVISO LEGAL",
+    if url_valida(datos.get("roblox_avatar_url")):
+        embed.set_image(url=url_valida(datos["roblox_avatar_url"]))
+
+    embed.add_field(name="👤 Nombre completo",     value=f"`{datos['nombre']} {datos['apellido']}`", inline=True)
+    embed.add_field(name="🎮 Usuario Roblox",      value=f"`{datos['nombre_roblox']}`",              inline=True)
+    embed.add_field(name="🆔 ID Roblox",           value=f"`{datos.get('roblox_id', 'N/A')}`",       inline=True)
+    embed.add_field(name="🪪 RUT",                 value=f"`{datos['rut']}`",                        inline=True)
+    embed.add_field(name="⚧️ Sexo",                value=f"`{datos['sexo']}`",                       inline=True)
+    embed.add_field(name="🩸 Tipo de sangre",      value=f"`{datos['tipo_sangre']}`",                inline=True)
+    embed.add_field(name="💼 Ocupación",           value=f"`{datos['ocupacion']}`",                  inline=True)
+    embed.add_field(name="💍 Estado civil",        value=f"`{datos['estado_civil']}`",               inline=True)
+    embed.add_field(name="🌎 País de origen",      value=f"`{datos['pais']}`",                       inline=True)
+    embed.add_field(name="📍 Ciudad / Localidad",  value=f"`{datos['ciudad']}`",                     inline=True)
+    embed.add_field(name="🎂 Fecha de nacimiento", value=f"`{datos['fecha_nacimiento']}`",            inline=True)
+    embed.add_field(name="🔢 Edad",                value=f"`{datos['edad']} años`",                  inline=True)
+    embed.add_field(name="📅 Fecha de emisión",    value=f"`{datos['fecha_emision']}`",              inline=True)
+    embed.add_field(
+        name="\u200b",
         value=(
-            "*Documento de uso exclusivo para el servidor de roleplay **Las Condes RP**. "
-            "Este documento es simulado y no tiene validez fuera del servidor. "
-            "Su falsificación o mal uso será sancionado conforme al reglamento.*"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "✅ *Documento emitido por el Registro Civil de La Zona Roja RP*\n"
+            "⚠️ *Este documento es válido únicamente dentro del servidor.*"
+            + CREDIT_MSG
         ),
-        inline=False,
+        inline=False
+    )
+    embed.set_footer(
+        text=f"Cédula de {usuario_nombre} • La Zona Roja RP",
+        icon_url=url_valida(discord_avatar_url)
+    )
+    return embed
+
+
+def construir_embed_reverso(datos, usuario_nombre, discord_avatar_url):
+    nombre_completo      = f"{datos['nombre']} {datos['apellido']}"
+    codigo_verificacion  = f"{datos['rut'].replace('.','').replace('-','')}-LZRRP-{datos.get('roblox_id','0')}"
+
+    embed = discord.Embed(
+        title="🪪  REVERSO — CÉDULA DE IDENTIDAD",
+        description=(
+            "```ansi\n"
+            "\u001b[0;31m╔════════════════════════════════════════════════╗\u001b[0m\n"
+            "\u001b[0;31m║\u001b[0m  \u001b[1;37mDAT O S   C O M P L E M E N T A R I O S\u001b[0m     \u001b[0;31m║\u001b[0m\n"
+            "\u001b[0;31m║\u001b[0m  \u001b[0;33mREVERSO  ·  LA ZONA ROJA RP  ·  SRCeI\u001b[0m      \u001b[0;31m║\u001b[0m\n"
+            "\u001b[0;31m╚════════════════════════════════════════════════╝\u001b[0m\n"
+            "```"
+        ),
+        color=COLOR_MARCA,
+        timestamp=datetime.datetime.utcnow()
+    )
+    embed.set_author(name="La Zona Roja RP — Registro Civil", icon_url=url_valida(LOGO_URL))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+
+    embed.add_field(
+        name="✍️ Firma del titular",
+        value=f"```{generar_firma(nombre_completo)}```",
+        inline=False
+    )
+    embed.add_field(name="🔢 Código de verificación", value=f"`{codigo_verificacion}`", inline=False)
+
+    # MRZ simulada
+    mrz1 = f"IDCHL{datos['rut'].replace('.','').replace('-',''):20}"
+    mrz2 = f"{datos['fecha_nacimiento'].replace('/','')}{datos['sexo'][0].upper()}{''.join(random.choices('0123456789', k=7))}"
+    mrz3 = f"{datos['apellido'].upper()[:10]}<<{datos['nombre'].upper()[:10]}"
+    embed.add_field(
+        name="🔍 MRZ — Zona Legible por Máquina",
+        value=f"```\n{mrz1[:30]}\n{mrz2[:30]}\n{mrz3[:30]}\n```",
+        inline=False
     )
 
-    e.set_footer(
-        text=f"🔏 N° Serie: {ced.get('num_serie', '—')}  ·  Emitida: {ced.get('fecha_creacion', '—')}  ·  Las Condes RP\n"
-             f"🛡️ Sistema desarrollado por Player.banned (NOT THE FACE)  ·  © 2026",
-        icon_url=icon,
+    embed.add_field(
+        name="▦ Código de Barras PDF417",
+        value=f"```{barcode(datos.get('rut', 'LZRRP'))}```",
+        inline=False
     )
+    embed.add_field(
+        name="🏛️ Autoridad emisora",
+        value="Registro Civil e Identificación — La Zona Roja RP",
+        inline=False
+    )
+    embed.add_field(
+        name="✍️ Firmas de Autoridad",
+        value=(
+            "```\n"
+            f"Director SRCeI (RP):        {'_'*22}\n"
+            f"Oficial Registro Civil:     {'_'*22}\n"
+            f"Autoridad La Zona Roja RP:  {'_'*22}\n"
+            "```"
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="\u200b",
+        value=(
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ *Documento de rol exclusivo para uso dentro del servidor. No representa una identificación real.*"
+            + CREDIT_MSG
+        ),
+        inline=False
+    )
+    embed.set_footer(
+        text=f"Reverso de la cédula de {usuario_nombre} • La Zona Roja RP",
+        icon_url=url_valida(discord_avatar_url)
+    )
+    return embed
 
-    return e
-
-
-# ── Views / Modales ──────────────────────────────────────────────────────
-
-class CedulaView(discord.ui.View):
-    def __init__(self, ced: dict, avatar_url: str | None, guild: discord.Guild | None, owner_id: int):
+# ─────────────────────────────────────────────
+#  VIEW DOBLE CARA (Frente / Reverso)
+# ─────────────────────────────────────────────
+class DNIView(discord.ui.View):
+    def __init__(self, datos, usuario_nombre, discord_avatar_url, owner_id):
         super().__init__(timeout=300)
-        self.ced = ced
-        self.avatar = avatar_url
-        self.guild = guild
-        self.owner_id = owner_id
-        self.cara = "frente"
+        self.datos              = datos
+        self.usuario_nombre     = usuario_nombre
+        self.discord_avatar_url = discord_avatar_url
+        self.owner_id           = owner_id
+        self.cara               = "frente"
         self.btn_frente.disabled = True
 
-    def _build(self) -> discord.Embed:
+    def _build(self):
         if self.cara == "frente":
-            return embed_frente(self.ced, self.avatar, self.guild)
-        return embed_reverso(self.ced, self.guild)
+            return construir_embed_frente(self.datos, self.usuario_nombre, self.discord_avatar_url)
+        return construir_embed_reverso(self.datos, self.usuario_nombre, self.discord_avatar_url)
 
-    @discord.ui.button(label="🪪 Ver Frente", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="🪪 Ver Frente", style=discord.ButtonStyle.danger)
     async def btn_frente(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.cara = "frente"
-        self.btn_frente.disabled = True
+        self.btn_frente.disabled  = True
         self.btn_reverso.disabled = False
         await interaction.response.edit_message(embed=self._build(), view=self)
 
-    @discord.ui.button(label="🔄 Ver Reverso", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🔄 Ver Reverso", style=discord.ButtonStyle.secondary)
     async def btn_reverso(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.cara = "reverso"
-        self.btn_frente.disabled = False
+        self.btn_frente.disabled  = False
         self.btn_reverso.disabled = True
         await interaction.response.edit_message(embed=self._build(), view=self)
 
     @discord.ui.button(label="🗑️ Cerrar", style=discord.ButtonStyle.danger)
     async def btn_cerrar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("⛔ Solo quien usó el comando puede cerrarlo.", ephemeral=True)
+            await interaction.response.send_message("⛔ Solo quien creó la cédula puede cerrarla.", ephemeral=True)
             return
         await interaction.message.delete()
 
@@ -440,99 +430,130 @@ class CedulaView(discord.ui.View):
         for item in self.children:
             item.disabled = True
 
-
-class ModalDatosBase(discord.ui.Modal, title="🇨🇱 Registro Civil — Las Condes RP"):
-    nombres = discord.ui.TextInput(label="Nombres", placeholder="Ej: Ignacio Andrés", max_length=50)
-    apellidos = discord.ui.TextInput(label="Apellidos", placeholder="Ej: Muñoz Contreras", max_length=60)
-    fecha_nacimiento = discord.ui.TextInput(
-        label="Fecha de Nacimiento (DD/MM/YYYY)", placeholder="Ej: 23/09/1998", max_length=10
-    )
-    ocupacion = discord.ui.TextInput(
-        label="Ocupación / Profesión", placeholder="Ej: Carabinero, Médico, Estudiante...", max_length=60
-    )
-    region_nacimiento = discord.ui.TextInput(
-        label="Región de Nacimiento", placeholder="Ej: Región Metropolitana, Valparaíso...", max_length=60
-    )
+# ─────────────────────────────────────────────
+#  MODAL PASO 1 — DATOS BASE
+# ─────────────────────────────────────────────
+class ModalDatosBase(discord.ui.Modal, title="🇨🇱 La Zona Roja RP — Registro Civil"):
+    nombre = discord.ui.TextInput(label="Nombre(s)", placeholder="Ej: Juan Andrés", max_length=50)
+    apellido = discord.ui.TextInput(label="Apellido(s)", placeholder="Ej: Pérez Soto", max_length=60)
+    fecha_nacimiento = discord.ui.TextInput(label="Fecha de Nacimiento (DD/MM/YYYY)", placeholder="Ej: 23/09/1998", max_length=10)
+    pais = discord.ui.TextInput(label="País de Origen", placeholder="Ej: Chile, Argentina...", max_length=40)
+    ciudad = discord.ui.TextInput(label="Ciudad / Localidad", placeholder="Ej: Santiago, Valparaíso...", max_length=50)
 
     async def on_submit(self, interaction: discord.Interaction):
         edad = calcular_edad(self.fecha_nacimiento.value)
-        if edad is None or not (0 <= edad <= 120):
+        if edad == "INVALIDA":
             await interaction.response.send_message(
-                "❌ **Fecha inválida.** Usa el formato `DD/MM/YYYY`.\nEjemplo: `23/09/1998`", ephemeral=True
+                "❌ **Fecha inválida.** Usa el formato `DD/MM/YYYY`.\nEjemplo: `23/09/1998`",
+                ephemeral=True
             )
             return
 
         UserSession.set(interaction.user.id, {
-            "nombres": self.nombres.value.strip(),
-            "apellidos": self.apellidos.value.strip(),
+            "nombre":           self.nombre.value.strip(),
+            "apellido":         self.apellido.value.strip(),
             "fecha_nacimiento": self.fecha_nacimiento.value.strip(),
-            "ocupacion": self.ocupacion.value.strip(),
-            "region_nacimiento": self.region_nacimiento.value.strip(),
-            "edad": edad,
+            "pais":             self.pais.value.strip(),
+            "ciudad":           self.ciudad.value.strip(),
+            "edad":             edad,
         })
 
         await interaction.response.send_message(
             "✅ **Paso 1 completado.**\n"
-            "Ahora selecciona tu **Sexo**, **Estado Civil** y **Grupo Sanguíneo** en los menús de abajo.\n"
-            "*(Al seleccionar los tres, avanzarás automáticamente al siguiente paso)*",
+            "Ahora selecciona tu **Sexo**, **Tipo de Sangre**, **Ocupación** y **Estado Civil**.\n"
+            "*(Al completar los cuatro, avanzarás automáticamente.)*",
             ephemeral=True,
-            view=SelectsView(interaction.user.id),
+            view=SelectsView(interaction.user.id)
         )
 
-
+# ─────────────────────────────────────────────
+#  SELECTS VIEW — PASO 2
+# ─────────────────────────────────────────────
 OPT_SEXO = [
-    discord.SelectOption(label="Masculino", value="Masculino", emoji="👨"),
-    discord.SelectOption(label="Femenino", value="Femenino", emoji="👩"),
-]
-OPT_CIVIL = [
-    discord.SelectOption(label="Soltero/a", value="Soltero/a", emoji="💔"),
-    discord.SelectOption(label="Casado/a", value="Casado/a", emoji="💍"),
-    discord.SelectOption(label="Divorciado/a", value="Divorciado/a", emoji="📜"),
-    discord.SelectOption(label="Viudo/a", value="Viudo/a", emoji="🕊️"),
-    discord.SelectOption(label="Conviviente", value="Conviviente", emoji="🤝"),
-    discord.SelectOption(label="Separado/a", value="Separado/a", emoji="📋"),
+    discord.SelectOption(label="♂️ Masculino",  value="Masculino",  emoji="👨"),
+    discord.SelectOption(label="♀️ Femenino",   value="Femenino",   emoji="👩"),
+    discord.SelectOption(label="⚧️ No binario", value="No binario", emoji="🏳️‍🌈"),
 ]
 OPT_SANGRE = [
-    discord.SelectOption(label="A+", value="A+", emoji="🩸"),
-    discord.SelectOption(label="A-", value="A-", emoji="🩸"),
-    discord.SelectOption(label="B+", value="B+", emoji="🩸"),
-    discord.SelectOption(label="B-", value="B-", emoji="🩸"),
+    discord.SelectOption(label="A+",  value="A+",  emoji="🩸"),
+    discord.SelectOption(label="A-",  value="A-",  emoji="🩸"),
+    discord.SelectOption(label="B+",  value="B+",  emoji="🩸"),
+    discord.SelectOption(label="B-",  value="B-",  emoji="🩸"),
     discord.SelectOption(label="AB+", value="AB+", emoji="🩸"),
     discord.SelectOption(label="AB-", value="AB-", emoji="🩸"),
-    discord.SelectOption(label="O+", value="O+", emoji="🩸"),
-    discord.SelectOption(label="O-", value="O-", emoji="🩸"),
+    discord.SelectOption(label="O+",  value="O+",  emoji="🩸"),
+    discord.SelectOption(label="O-",  value="O-",  emoji="🩸"),
+]
+OPT_OCUPACION = [
+    discord.SelectOption(label="👮 Carabinero",    value="Carabinero"),
+    discord.SelectOption(label="🕵️ PDI",           value="Detective / PDI"),
+    discord.SelectOption(label="🚑 SAMU",          value="Paramédico / SAMU"),
+    discord.SelectOption(label="🚒 Bombero",       value="Bombero"),
+    discord.SelectOption(label="⚖️ Abogado",       value="Abogado"),
+    discord.SelectOption(label="👨‍⚕️ Médico",       value="Médico"),
+    discord.SelectOption(label="🏦 Empresario",    value="Empresario"),
+    discord.SelectOption(label="🔧 Mecánico",      value="Mecánico"),
+    discord.SelectOption(label="🚖 Taxista",       value="Taxista"),
+    discord.SelectOption(label="🍳 Chef",          value="Cocinero / Chef"),
+    discord.SelectOption(label="🏗️ Constructor",   value="Obrero / Constructor"),
+    discord.SelectOption(label="🎓 Estudiante",    value="Estudiante"),
+    discord.SelectOption(label="💼 Desempleado",   value="Desempleado"),
+    discord.SelectOption(label="🎭 Otros",         value="Otros"),
+]
+OPT_CIVIL = [
+    discord.SelectOption(label="💛 Soltero/a",    value="Soltero/a",    emoji="💔"),
+    discord.SelectOption(label="💍 Casado/a",     value="Casado/a",     emoji="💍"),
+    discord.SelectOption(label="💔 Divorciado/a", value="Divorciado/a", emoji="📜"),
+    discord.SelectOption(label="🖤 Viudo/a",      value="Viudo/a",      emoji="🕊️"),
 ]
 
 
 class SelectsView(discord.ui.View):
     def __init__(self, uid: int):
         super().__init__(timeout=300)
-        self.uid = uid
-        self._sexo = None
-        self._civil = None
-        self._sangre = None
+        self.uid       = uid
+        self._sexo     = None
+        self._sangre   = None
+        self._ocupacion= None
+        self._civil    = None
 
-        self.sel_sexo = discord.ui.Select(placeholder="⚧️ Selecciona tu Sexo", options=OPT_SEXO, row=0)
-        self.sel_civil = discord.ui.Select(placeholder="💑 Estado Civil", options=OPT_CIVIL, row=1)
-        self.sel_sang = discord.ui.Select(placeholder="🩸 Grupo Sanguíneo", options=OPT_SANGRE, row=2)
+        self.sel_sexo      = discord.ui.Select(placeholder="⚧️ Selecciona tu Sexo",       options=OPT_SEXO,      row=0)
+        self.sel_sangre    = discord.ui.Select(placeholder="🩸 Tipo de Sangre",            options=OPT_SANGRE,    row=1)
+        self.sel_ocupacion = discord.ui.Select(placeholder="💼 Ocupación",                options=OPT_OCUPACION, row=2)
+        self.sel_civil     = discord.ui.Select(placeholder="💍 Estado Civil",             options=OPT_CIVIL,     row=3)
 
-        self.sel_sexo.callback = self._cb_sexo
-        self.sel_civil.callback = self._cb_civil
-        self.sel_sang.callback = self._cb_sang
+        self.sel_sexo.callback      = self._cb_sexo
+        self.sel_sangre.callback    = self._cb_sangre
+        self.sel_ocupacion.callback = self._cb_ocupacion
+        self.sel_civil.callback     = self._cb_civil
 
         self.add_item(self.sel_sexo)
+        self.add_item(self.sel_sangre)
+        self.add_item(self.sel_ocupacion)
         self.add_item(self.sel_civil)
-        self.add_item(self.sel_sang)
 
     def _status(self) -> str:
-        sx = f"✅ **Sexo:** {self._sexo}" if self._sexo else "⬜ Sexo — pendiente"
-        cv = f"✅ **Estado Civil:** {self._civil}" if self._civil else "⬜ Estado Civil — pendiente"
-        sg = f"✅ **Grupo Sanguíneo:** {self._sangre}" if self._sangre else "⬜ Grupo Sanguíneo — pendiente"
-        return f"Selecciona los tres campos para continuar:\n{sx}\n{cv}\n{sg}"
+        sx = f"✅ **Sexo:** {self._sexo}"           if self._sexo      else "⬜ Sexo — pendiente"
+        sg = f"✅ **Sangre:** {self._sangre}"        if self._sangre    else "⬜ Tipo de Sangre — pendiente"
+        oc = f"✅ **Ocupación:** {self._ocupacion}"  if self._ocupacion else "⬜ Ocupación — pendiente"
+        cv = f"✅ **Estado Civil:** {self._civil}"   if self._civil     else "⬜ Estado Civil — pendiente"
+        return f"{sx}\n{sg}\n{oc}\n{cv}"
 
     async def _cb_sexo(self, interaction: discord.Interaction):
         self._sexo = self.sel_sexo.values[0]
         self.sel_sexo.disabled = True
+        await interaction.response.edit_message(content=self._status(), view=self)
+        await self._check(interaction)
+
+    async def _cb_sangre(self, interaction: discord.Interaction):
+        self._sangre = self.sel_sangre.values[0]
+        self.sel_sangre.disabled = True
+        await interaction.response.edit_message(content=self._status(), view=self)
+        await self._check(interaction)
+
+    async def _cb_ocupacion(self, interaction: discord.Interaction):
+        self._ocupacion = self.sel_ocupacion.values[0]
+        self.sel_ocupacion.disabled = True
         await interaction.response.edit_message(content=self._status(), view=self)
         await self._check(interaction)
 
@@ -542,24 +563,27 @@ class SelectsView(discord.ui.View):
         await interaction.response.edit_message(content=self._status(), view=self)
         await self._check(interaction)
 
-    async def _cb_sang(self, interaction: discord.Interaction):
-        self._sangre = self.sel_sang.values[0]
-        self.sel_sang.disabled = True
-        await interaction.response.edit_message(content=self._status(), view=self)
-        await self._check(interaction)
-
     async def _check(self, interaction: discord.Interaction):
-        if not (self._sexo and self._civil and self._sangre):
+        if not (self._sexo and self._sangre and self._ocupacion and self._civil):
             return
-        UserSession.update(self.uid, sexo=self._sexo, estado_civil=self._civil, tipo_sangre=self._sangre)
+        UserSession.update(
+            self.uid,
+            sexo=self._sexo,
+            tipo_sangre=self._sangre,
+            ocupacion=self._ocupacion,
+            estado_civil=self._civil,
+        )
         await interaction.followup.send(
             "✅ **Paso 2 completado.**\n"
-            "Ahora ingresa tu **usuario de Roblox** para obtener tu foto de avatar en la cédula.",
+            "Último paso: ingresa tu **usuario de Roblox** para obtener tu foto en la cédula.",
             ephemeral=True,
-            view=BotonRoblox(self.uid),
+            view=BotonRoblox(self.uid)
         )
 
 
+# ─────────────────────────────────────────────
+#  BOTÓN ROBLOX — PASO 3
+# ─────────────────────────────────────────────
 class BotonRoblox(discord.ui.View):
     def __init__(self, uid: int):
         super().__init__(timeout=300)
@@ -571,8 +595,10 @@ class BotonRoblox(discord.ui.View):
 
 
 class ModalRoblox(discord.ui.Modal, title="🎮 Usuario de Roblox — Paso Final"):
-    roblox_username = discord.ui.TextInput(
-        label="Tu nombre de usuario en Roblox", placeholder="Ej: xXChilePlayer123Xx", max_length=50
+    nombre_roblox = discord.ui.TextInput(
+        label="Tu nombre de usuario en Roblox",
+        placeholder="Ej: xXZonaRojaPlayerXx",
+        max_length=50
     )
 
     def __init__(self, uid: int):
@@ -584,481 +610,617 @@ class ModalRoblox(discord.ui.Modal, title="🎮 Usuario de Roblox — Paso Final
 
         session = UserSession.get(self.uid)
         if not session:
-            await interaction.followup.send("❌ Tu sesión expiró. Vuelve a usar `/crear-cedula`.", ephemeral=True)
+            await interaction.followup.send("❌ Tu sesión expiró. Usa `/crear_dni` de nuevo.", ephemeral=True)
             return
 
-        roblox_user = self.roblox_username.value.strip()
-        hoy = datetime.date.today().strftime("%d/%m/%Y")
+        roblox_user = self.nombre_roblox.value.strip()
+        roblox_info = await obtener_info_roblox(roblox_user)
 
-        ced_data = {
-            "nombres": session["nombres"],
-            "apellidos": session["apellidos"],
-            "fecha_nacimiento": session["fecha_nacimiento"],
-            "edad": session["edad"],
-            "sexo": session.get("sexo", "—"),
-            "ocupacion": session["ocupacion"],
-            "region_nacimiento": session["region_nacimiento"],
-            "estado_civil": session.get("estado_civil", "—"),
-            "tipo_sangre": session.get("tipo_sangre", "—"),
-            "rut": generar_rut(),
-            "num_serie": generar_num_serie(),
-            "roblox_username": roblox_user,
-            "fecha_creacion": hoy,
-            "custom_color": None,
-            "banner_url": None,
-            "lema": None,
+        if roblox_info is None:
+            roblox_id     = "N/A"
+            roblox_avatar = None
+            aviso = (
+                f"⚠️ No encontré **{roblox_user}** en Roblox. "
+                "La cédula se creará sin foto de avatar."
+            )
+        else:
+            roblox_id     = str(roblox_info["user_id"])
+            roblox_avatar = roblox_info["avatar_url"]
+            aviso = f"✅ Perfil Roblox encontrado: **{roblox_info['display_name']}** (ID: `{roblox_id}`)"
+
+        datos_dni = {
+            "nombre":            session["nombre"],
+            "apellido":          session["apellido"],
+            "fecha_nacimiento":  session["fecha_nacimiento"],
+            "edad":              session["edad"],
+            "pais":              session["pais"],
+            "ciudad":            session["ciudad"],
+            "sexo":              session.get("sexo", "—"),
+            "tipo_sangre":       session.get("tipo_sangre", "—"),
+            "ocupacion":         session.get("ocupacion", "—"),
+            "estado_civil":      session.get("estado_civil", "—"),
+            "nombre_roblox":     roblox_user,
+            "roblox_id":         roblox_id,
+            "roblox_avatar_url": roblox_avatar,
+            "rut":               generar_rut(),
+            "fecha_emision":     datetime.datetime.now().strftime("%d/%m/%Y"),
         }
 
-        set_cedula(self.uid, ced_data)
+        guardar_dni_db(self.uid, datos_dni)
         UserSession.clear(self.uid)
 
-        nombre_completo = f"{session['nombres']} {session['apellidos']}"
-        await interaction.followup.send(
-            f"✅ **¡Cédula de Identidad creada exitosamente!**\n\n"
-            f"**Nombre:** {nombre_completo.upper()}\n"
-            f"**RUT:** {ced_data['rut']}\n"
-            f"**Edad:** {session['edad']} años\n"
-            f"**Región:** {session['region_nacimiento']}\n"
-            f"**Roblox:** `{roblox_user}`\n\n"
-            f"Usa `/ver-cedula` para ver tu documento con tu avatar. 🇨🇱" + CREDIT_MSG,
-            ephemeral=True,
+        nombre_completo = f"{session['nombre']} {session['apellido']}"
+        await interaction.followup.send(aviso, ephemeral=True)
+
+        embed_frente  = construir_embed_frente(datos_dni, interaction.user.display_name, interaction.user.display_avatar.url)
+        embed_reverso = construir_embed_reverso(datos_dni, interaction.user.display_name, interaction.user.display_avatar.url)
+
+        view = DNIView(
+            datos=datos_dni,
+            usuario_nombre=interaction.user.display_name,
+            discord_avatar_url=str(interaction.user.display_avatar.url),
+            owner_id=self.uid
+        )
+        view.btn_frente.disabled = True
+
+        await interaction.channel.send(
+            content=f"🎉 ¡Bienvenido/a a **La Zona Roja RP**, {nombre_completo}! Tu cédula ha sido creada." + CREDIT_MSG,
+            embed=embed_frente,
+            view=view
         )
 
+# ─────────────────────────────────────────────
+#  HELPERS — SANCIONES
+# ─────────────────────────────────────────────
+TIPOS_SANCION = [
+    app_commands.Choice(name="⚠️  Advertencia",   value="advertencia"),
+    app_commands.Choice(name="🔇  Mute",           value="mute"),
+    app_commands.Choice(name="👢  Kick",           value="kick"),
+    app_commands.Choice(name="🔨  Ban",            value="ban"),
+    app_commands.Choice(name="⛔  Ban Permanente", value="ban_permanente"),
+    app_commands.Choice(name="🚫  Blacklist",      value="blacklist"),
+    app_commands.Choice(name="📛  Sanción Leve",   value="sancion_leve"),
+    app_commands.Choice(name="🔴  Sanción Grave",  value="sancion_grave"),
+    app_commands.Choice(name="🛑  Sanción Máxima", value="sancion_maxima"),
+]
+ESTADO_COLORES = {"activa": 0xE74C3C, "apelada": 0xF39C12, "inactiva": 0x95A5A6}
+TIPO_EMOJIS = {
+    "advertencia": "⚠️", "mute": "🔇", "kick": "👢", "ban": "🔨",
+    "ban_permanente": "⛔", "blacklist": "🚫",
+    "sancion_leve": "📛", "sancion_grave": "🔴", "sancion_maxima": "🛑",
+}
+TIPO_NOMBRES = {
+    "advertencia": "Advertencia", "mute": "Mute", "kick": "Kick", "ban": "Ban",
+    "ban_permanente": "Ban Permanente", "blacklist": "Blacklist",
+    "sancion_leve": "Sanción Leve", "sancion_grave": "Sanción Grave", "sancion_maxima": "Sanción Máxima",
+}
 
-class ModalPersonalizar(discord.ui.Modal, title="✨ Personalizar Cédula — VIP"):
-    color_hex = discord.ui.TextInput(
-        label="Color del Embed (HEX sin #)", placeholder="Ej: D52B1E  |  vacío = sin cambio",
-        required=False, max_length=6,
-    )
-    banner_url = discord.ui.TextInput(
-        label="URL de Banner / Imagen de Fondo", placeholder="https://i.imgur.com/...  (vacío = sin cambio)",
-        required=False, max_length=300,
-    )
-    lema = discord.ui.TextInput(
-        label="Lema o Frase de tu Personaje", placeholder="Ej: 'Por la razón o la fuerza.'",
-        required=False, max_length=120,
-    )
-    roblox_username = discord.ui.TextInput(
-        label="Actualizar Usuario de Roblox", placeholder="Nuevo nombre en Roblox (vacío = sin cambio)",
-        required=False, max_length=50,
-    )
+def _ts(dt_str: str) -> str:
+    try:
+        dt = datetime.datetime.fromisoformat(dt_str)
+        return f"<t:{int(dt.timestamp())}:R>"
+    except Exception:
+        return dt_str
 
-    async def on_submit(self, interaction: discord.Interaction):
-        ced = get_cedula(interaction.user.id)
-        if not ced:
-            await interaction.response.send_message("❌ No tienes una cédula creada. Usa `/crear-cedula` primero.", ephemeral=True)
-            return
+def _ahora() -> str:
+    return datetime.datetime.now(timezone.utc).isoformat()
 
-        cambios = []
-        if self.color_hex.value.strip():
-            try:
-                int(self.color_hex.value.strip(), 16)
-                ced["custom_color"] = self.color_hex.value.strip().upper()
-                cambios.append(f"🎨 Color → `#{self.color_hex.value.strip().upper()}`")
-            except ValueError:
-                cambios.append("⚠️ Color inválido — ignorado")
+def _new_id() -> str:
+    return str(uuid.uuid4())[:8].upper()
 
-        if self.banner_url.value.strip():
-            ced["banner_url"] = self.banner_url.value.strip()
-            cambios.append("🖼️ Banner actualizado")
-
-        if self.lema.value.strip():
-            ced["lema"] = self.lema.value.strip()
-            cambios.append(f"✨ Lema → *\"{self.lema.value.strip()}\"*")
-
-        if self.roblox_username.value.strip():
-            ced["roblox_username"] = self.roblox_username.value.strip()
-            cambios.append(f"🎮 Roblox → `{self.roblox_username.value.strip()}`")
-
-        set_cedula(interaction.user.id, ced)
-        resumen = "\n".join(cambios) if cambios else "*(Sin cambios aplicados)*"
-        await interaction.response.send_message(
-            f"✅ **Cédula personalizada.**\n\n{resumen}\n\nUsa `/ver-cedula` para verla.", ephemeral=True
-        )
-
-
-class ConfirmarEliminar(discord.ui.View):
-    def __init__(self):
+# ─────────────────────────────────────────────
+#  VIEW — Confirmación borrado sanción
+# ─────────────────────────────────────────────
+class ConfirmarBorrado(discord.ui.View):
+    def __init__(self, interaction, guild_id, user_id, sancion_id, usuario, sancion, motivo):
         super().__init__(timeout=30)
+        self.orig_interaction = interaction
+        self.guild_id   = guild_id
+        self.user_id    = user_id
+        self.sancion_id = sancion_id
+        self.usuario    = usuario
+        self.sancion    = sancion
+        self.motivo     = motivo
 
-    @discord.ui.button(label="✅ Sí, eliminar", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Sí, eliminar", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        del_cedula(interaction.user.id)
-        await interaction.response.edit_message(
-            content="🗑️ Tu cédula ha sido eliminada del **Registro Civil de Las Condes RP**.", embed=None, view=None
-        )
+        if interaction.user != self.orig_interaction.user:
+            await interaction.response.send_message("No puedes usar este botón.", ephemeral=True)
+            return
+        ok = _eliminar_sancion(self.guild_id, self.user_id, self.sancion_id)
+        self.stop()
+        for item in self.children:
+            item.disabled = True
+        if ok:
+            emoji       = TIPO_EMOJIS.get(self.sancion["tipo"], "🔴")
+            nombre_tipo = TIPO_NOMBRES.get(self.sancion["tipo"], self.sancion["tipo"])
+            embed = discord.Embed(
+                title="✅  Sanción Eliminada",
+                description="La sanción fue eliminada permanentemente del historial.",
+                color=0x2ECC71,
+                timestamp=datetime.datetime.now(timezone.utc)
+            )
+            embed.set_author(name=str(self.usuario), icon_url=self.usuario.display_avatar.url)
+            embed.add_field(name="🆔 ID",         value=f"`{self.sancion_id}`",      inline=True)
+            embed.add_field(name="🏷️ Tipo",       value=f"{emoji} {nombre_tipo}",   inline=True)
+            embed.add_field(name="📝 Motivo",      value=self.motivo,                inline=False)
+            embed.add_field(name="🛡️ Borrado por", value=interaction.user.mention,   inline=True)
+            embed.set_footer(text=f"Servidor: {interaction.guild.name}")
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.response.edit_message(content="❌ No se pudo eliminar.", view=self)
 
-    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary, emoji="✖️")
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.orig_interaction.user:
+            await interaction.response.send_message("No puedes usar este botón.", ephemeral=True)
+            return
+        self.stop()
+        for item in self.children:
+            item.disabled = True
         await interaction.response.edit_message(
-            content="✅ Eliminación cancelada. Tu cédula sigue activa.", embed=None, view=None
+            embed=discord.Embed(description="❎ Operación cancelada.", color=0x95A5A6),
+            view=self
         )
 
-
-# ═════════════════════════════════════════════════════════════════════════
-#  BOT
-# ═════════════════════════════════════════════════════════════════════════
-
-intents = discord.Intents.default()
-intents.reactions = True
-intents.guilds = True
-intents.members = True          # requerido para revisar roles VIP
-intents.message_content = True  # requerido por commands.Bot con prefijo "!"
-
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-
-def is_staff():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        if interaction.user.guild_permissions.administrator:
-            return True
-        if STAFF_ROLE_ID:
-            role = interaction.guild.get_role(STAFF_ROLE_ID)
-            if role and role in interaction.user.roles:
-                return True
-        await interaction.response.send_message(
-            "❌ No tienes permisos de Staff para usar este comando.", ephemeral=True
-        )
-        return False
-
-    return app_commands.check(predicate)
-
-
+# ─────────────────────────────────────────────
+#  ON_READY
+# ─────────────────────────────────────────────
 @bot.event
 async def on_ready():
+    print(f'✅ Conectado como {bot.user.name}')
+    await bot.change_presence(activity=discord.Game(name="Moderando La Zona Roja RP 🇨🇱"))
+    guild = discord.Object(id=ID_SERVIDOR)
     try:
-        synced = await bot.tree.sync()
-        print(f"✅ Conectado como {bot.user} | {len(synced)} comandos sincronizados")
+        print("🔄 Sincronizando comandos Slash...")
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"✅ {len(synced)} comandos sincronizados.")
     except Exception as e:
-        print(f"Error sincronizando comandos: {e}")
+        print(f"❌ Error al sincronizar: {e}")
 
-    activity = discord.Activity(type=discord.ActivityType.watching, name="Las Condes RP 🇨🇱 | /ayuda")
-    await bot.change_presence(status=discord.Status.online, activity=activity)
+# ══════════════════════════════════════════════
+#  COMANDOS — DNI
+# ══════════════════════════════════════════════
 
-
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.CheckFailure):
-        return  # ya se respondió dentro del check (is_staff / has_permissions)
-    print(f"Error en comando: {error}")
-    if not interaction.response.is_done():
-        await interaction.response.send_message("❌ Ocurrió un error al ejecutar el comando.", ephemeral=True)
-
-
-# ── Apertura / Cierre del servidor ───────────────────────────────────────
-
-def build_apertura_embed(hora: str, meta_votos: int) -> discord.Embed:
+@bot.tree.command(name="crear_dni", description="Crea tu cédula de identidad de La Zona Roja RP con foto de Roblox")
+async def crear_dni(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🇨🇱 ENCUESTA DE APERTURA | LAS CONDES RP",
+        title="🇨🇱  LA ZONA ROJA RP — REGISTRO CIVIL",
         description=(
-            "🏙️ **Las Condes RP** se prepara para una nueva sesión de Roleplay.\n"
-            "Queremos saber qué institución/rol representarás durante la apertura.\n\n"
-            "━━━━━━━━━━━━━━━━━━━"
-        ),
-        color=EMBED_COLOR,
-    )
-    embed.add_field(
-        name="📊 INFORMACIÓN DE LA APERTURA",
-        value=(
-            f"🎯 **Meta de votos:** {meta_votos}\n"
-            f"🕐 **Hora de apertura:** {hora}\n"
-            f"🟢 **Estado:** ENCUESTA ACTIVA"
-        ),
-        inline=False,
-    )
-    opciones = "\n\n".join(f"<:{r['emoji_name']}:{r['emoji_id']}> {r['label']}" for r in ROLE_OPTIONS)
-    embed.add_field(name="🗳️ SELECCIONA TU ROL", value=opciones, inline=False)
-    embed.add_field(
-        name="⚠️ IMPORTANTE",
-        value="Tu reacción cuenta como un voto. Selecciona solo una opción y mantente atento a los anuncios del Staff.",
-        inline=False,
-    )
-    if INVITE_CODE:
-        embed.add_field(name="🔗 Invita a tus amigos", value=f"discord.gg/{INVITE_CODE}", inline=False)
-    if THUMBNAIL_URL:
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-    embed.set_footer(text="🇨🇱 LAS CONDES RP · Seriedad • Realismo • Roleplay")
-    return embed
-
-
-@bot.tree.command(name="abrir", description="Abre el servidor y publica la encuesta de apertura")
-@app_commands.describe(
-    hora="Hora de apertura (ej: 12:00)",
-    meta_votos="Meta de votos para la encuesta",
-    canal="Canal donde publicar (por defecto, el canal actual)",
-)
-@is_staff()
-async def abrir(
-    interaction: discord.Interaction,
-    hora: str = "12:00",
-    meta_votos: int = None,
-    canal: discord.TextChannel = None,
-):
-    global state
-    canal = canal or interaction.channel
-    meta = meta_votos or VOTE_GOAL_DEFAULT
-    embed = build_apertura_embed(hora, meta)
-    role_mention = f"<@&{NOTIFY_ROLE_ID}>" if NOTIFY_ROLE_ID else ""
-
-    await interaction.response.send_message("✅ Abriendo servidor y publicando encuesta...", ephemeral=True)
-    msg = await canal.send(content=role_mention, embed=embed)
-
-    for r in ROLE_OPTIONS:
-        try:
-            await msg.add_reaction(discord.PartialEmoji(name=r["emoji_name"], id=r["emoji_id"]))
-        except discord.HTTPException:
-            pass  # el emoji no existe en este servidor o el bot no tiene acceso a él
-
-    state = {
-        "status": "abierto",
-        "message_id": msg.id,
-        "channel_id": canal.id,
-        "meta_votos": meta,
-        "hora_apertura": hora,
-        "opened_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
-    save_state(state)
-
-
-@bot.tree.command(name="cerrar", description="Cierra la encuesta activa y el servidor, mostrando los resultados")
-@is_staff()
-async def cerrar(interaction: discord.Interaction):
-    global state
-    if state.get("status") != "abierto" or not state.get("message_id"):
-        await interaction.response.send_message("⚠️ No hay ninguna encuesta abierta actualmente.", ephemeral=True)
-        return
-
-    canal = bot.get_channel(state["channel_id"])
-    try:
-        msg = await canal.fetch_message(state["message_id"])
-    except (discord.NotFound, AttributeError):
-        await interaction.response.send_message(
-            "⚠️ No se encontró el mensaje de la encuesta original (¿fue borrado?). Se marcará como cerrado.",
-            ephemeral=True,
-        )
-        state["status"] = "cerrado"
-        save_state(state)
-        return
-
-    resultados = []
-    for r in ROLE_OPTIONS:
-        count = 0
-        for reaction in msg.reactions:
-            emoji_id = getattr(reaction.emoji, "id", None)
-            if emoji_id == r["emoji_id"]:
-                count = max(reaction.count - 1, 0)
-                break
-        resultados.append((r["label"], count))
-
-    resultados.sort(key=lambda x: x[1], reverse=True)
-    lista = "\n".join(f"**{label}:** {count} votos" for label, count in resultados)
-    total = sum(c for _, c in resultados)
-
-    embed_cierre = discord.Embed(
-        title="🔴 SERVIDOR CERRADO | LAS CONDES RP",
-        description=f"La encuesta de apertura ha finalizado.\n\n{lista}\n\n**Total de votos:** {total}",
-        color=EMBED_COLOR_CIERRE,
-    )
-    embed_cierre.set_footer(text="🇨🇱 LAS CONDES RP · Gracias por participar")
-
-    await interaction.response.send_message("✅ Cerrando servidor y publicando resultados...", ephemeral=True)
-    await canal.send(embed=embed_cierre)
-
-    try:
-        await msg.clear_reactions()
-    except discord.HTTPException:
-        pass
-
-    state["status"] = "cerrado"
-    save_state(state)
-
-
-@bot.tree.command(name="estado", description="Muestra el estado actual del servidor/encuesta")
-async def estado(interaction: discord.Interaction):
-    status = state.get("status", "cerrado")
-    emoji = "🟢" if status == "abierto" else "🔴"
-    texto = "ABIERTO" if status == "abierto" else "CERRADO"
-    await interaction.response.send_message(f"{emoji} El servidor está actualmente **{texto}**.", ephemeral=True)
-
-
-@bot.tree.command(name="ayuda", description="📖 Muestra todos los comandos disponibles del bot")
-async def ayuda(interaction: discord.Interaction):
-    embed = discord.Embed(title="📖 Comandos — Las Condes RP", color=EMBED_COLOR)
-    embed.add_field(
-        name="🏙️ Apertura / Cierre del servidor",
-        value=(
-            "`/abrir` — Abre el servidor y publica la encuesta *(Staff)*\n"
-            "`/cerrar` — Cierra la encuesta y muestra resultados *(Staff)*\n"
-            "`/estado` — Ver si el servidor está abierto o cerrado"
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="🪪 Registro Civil — Cédula de Identidad",
-        value=(
-            "`/crear-cedula` — Crea tu cédula de identidad\n"
-            "`/ver-cedula` — Muestra tu cédula (o la de otro usuario)\n"
-            "`/personalizar-cedula` — Personaliza color, banner y lema *(VIP)*\n"
-            "`/eliminar-cedula` — Elimina tu cédula\n"
-            "`/registro-info` — Estadísticas del Registro Civil\n"
-            "`/admin-cedula` — Elimina la cédula de otro usuario *(Admin)*"
-        ),
-        inline=False,
-    )
-    embed.set_footer(text="🇨🇱 LAS CONDES RP · Seriedad • Realismo • Roleplay")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-# ── Registro Civil — comandos ─────────────────────────────────────────────
-
-@bot.tree.command(name="crear-cedula", description="🪪 Crea tu Cédula de Identidad del Registro Civil de Las Condes RP")
-async def cmd_crear_cedula(interaction: discord.Interaction):
-    icon = logo(interaction.guild)
-    e = discord.Embed(
-        title="🇨🇱  REGISTRO CIVIL DE CHILE — LAS CONDES RP",
-        description=(
-            "Bienvenido al **Servicio de Registro Civil e Identificación** de Las Condes RP.\n\n"
-            "Aquí podrás crear tu **Cédula de Identidad** oficial del servidor.\n\n"
+            "Bienvenido al **Servicio de Registro Civil** de La Zona Roja RP.\n\n"
             "📋 **El proceso tiene 3 pasos:**\n"
-            "**1️⃣** Completar tus datos personales (formulario)\n"
-            "**2️⃣** Seleccionar Sexo, Estado Civil y Grupo Sanguíneo\n"
-            "**3️⃣** Ingresar tu usuario de Roblox para obtener tu foto\n\n"
+            "**1️⃣** Completa tus datos personales\n"
+            "**2️⃣** Selecciona Sexo, Sangre, Ocupación y Estado Civil\n"
+            "**3️⃣** Ingresa tu usuario de Roblox para la foto\n\n"
             "*Todo el proceso es privado — solo tú lo verás.*"
         ),
-        color=COLOR_AZUL,
+        color=COLOR_MARCA
     )
-    if icon:
-        e.set_author(name="Las Condes RP — Registro Civil", icon_url=icon)
-        e.set_thumbnail(url=icon)
-    e.set_footer(text="SRCeI  ·  Las Condes RP  ·  Registro Civil v1.0", icon_url=icon)
+    embed.set_author(name="La Zona Roja RP — Registro Civil", icon_url=url_valida(LOGO_URL))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="La Zona Roja RP  ·  Registro Civil v2.0")
 
     class IniciarView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=120)
 
-        @discord.ui.button(label="🇨🇱 Crear mi Cédula de Identidad", style=discord.ButtonStyle.primary)
+        @discord.ui.button(label="🇨🇱 Crear mi Cédula de Identidad", style=discord.ButtonStyle.danger)
         async def btn_crear(self, inter: discord.Interaction, button: discord.ui.Button):
             await inter.response.send_modal(ModalDatosBase())
 
-    await interaction.response.send_message(embed=e, view=IniciarView(), ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=IniciarView(), ephemeral=True)
 
 
-@bot.tree.command(name="ver-cedula", description="🪪 Muestra la Cédula de Identidad de un usuario")
-@app_commands.describe(usuario="Usuario cuya cédula quieres ver (vacío = la tuya)")
-async def cmd_ver_cedula(interaction: discord.Interaction, usuario: discord.Member = None):
-    await interaction.response.defer()
-
-    target = usuario or interaction.user
-    ced = get_cedula(target.id)
-
-    if not ced:
-        icon = logo(interaction.guild)
-        e = discord.Embed(
-            title="❌ Cédula no encontrada",
-            description=f"**{target.display_name}** no tiene una cédula registrada en Las Condes RP.\n\nUsa `/crear-cedula` para crear la tuya.",
-            color=COLOR_ROJO,
+@bot.tree.command(name="ver_dni", description="Muestra tu cédula de identidad registrada (o la de otro usuario)")
+@app_commands.describe(usuario="El miembro del que quieres ver el DNI (opcional)")
+async def ver_dni(interaction: discord.Interaction, usuario: discord.Member = None):
+    objetivo = usuario if usuario else interaction.user
+    datos    = obtener_dni_db(objetivo.id)
+    if not datos:
+        msg = (
+            f"❌ {objetivo.mention} aún no ha creado su cédula."
+            if usuario else
+            "❌ No tienes cédula. Usa `/crear_dni` para crearla."
         )
-        if icon:
-            e.set_author(name="Las Condes RP — Registro Civil", icon_url=icon)
-        await interaction.followup.send(embed=e, ephemeral=True)
+        await interaction.response.send_message(msg, ephemeral=True)
         return
 
-    avatar_url = await get_roblox_avatar(ced.get("roblox_username", ""))
-    embed = embed_frente(ced, avatar_url, interaction.guild)
-    view = CedulaView(ced=ced, avatar_url=avatar_url, guild=interaction.guild, owner_id=interaction.user.id)
-    await interaction.followup.send(embed=embed, view=view)
-
-
-@bot.tree.command(name="personalizar-cedula", description="✨ [VIP] Personaliza el color, banner y lema de tu cédula")
-async def cmd_personalizar_cedula(interaction: discord.Interaction):
-    if not tiene_vip(interaction.user):
-        icon = logo(interaction.guild)
-        e = discord.Embed(
-            title="⛔ Acceso VIP Requerido",
-            description=(
-                "Este comando es exclusivo para usuarios con roles **VIP, Donador o Staff**.\n"
-                "Contacta a la administración de **Las Condes RP** para obtener acceso."
-            ),
-            color=COLOR_ROJO,
-        )
-        if icon:
-            e.set_author(name="Las Condes RP — Registro Civil", icon_url=icon)
-        await interaction.response.send_message(embed=e, ephemeral=True)
-        return
-
-    if not get_cedula(interaction.user.id):
-        await interaction.response.send_message("❌ No tienes una cédula creada. Usa `/crear-cedula` primero.", ephemeral=True)
-        return
-
-    await interaction.response.send_modal(ModalPersonalizar())
-
-
-@bot.tree.command(name="registro-info", description="📊 Estadísticas del Registro Civil de Las Condes RP")
-async def cmd_registro_info(interaction: discord.Interaction):
-    db = load_db()
-    total = len(db)
-    vip_cnt = sum(1 for v in db.values() if any([v.get("lema"), v.get("banner_url"), v.get("custom_color")]))
-    hoy = datetime.date.today().strftime("%d/%m/%Y")
-
-    regiones = {}
-    for v in db.values():
-        reg = v.get("region_nacimiento", "Desconocida")
-        regiones[reg] = regiones.get(reg, 0) + 1
-    top_region = max(regiones, key=regiones.get) if regiones else "—"
-
-    icon = logo(interaction.guild)
-    e = discord.Embed(title="📊  LAS CONDES RP — REGISTRO CIVIL", color=COLOR_AZUL)
-    if icon:
-        e.set_author(name="Servicio de Registro Civil e Identificación", icon_url=icon)
-        e.set_thumbnail(url=icon)
-
-    e.add_field(name="🪪  Cédulas Registradas", value=f"```{total}```", inline=True)
-    e.add_field(name="✨  Cédulas VIP", value=f"```{vip_cnt}```", inline=True)
-    e.add_field(name="📅  Fecha", value=f"```{hoy}```", inline=True)
-    e.add_field(name="🏙️  Región Más Común", value=f"```{top_region}```", inline=False)
-
-    e.set_footer(text="SRCeI  ·  Las Condes RP  ·  Registro Civil v1.0", icon_url=icon)
-    await interaction.response.send_message(embed=e)
-
-
-@bot.tree.command(name="eliminar-cedula", description="🗑️ Elimina tu cédula del Registro Civil (permanente)")
-async def cmd_eliminar_cedula(interaction: discord.Interaction):
-    if not get_cedula(interaction.user.id):
-        await interaction.response.send_message("❌ No tienes una cédula registrada.", ephemeral=True)
-        return
-
-    icon = logo(interaction.guild)
-    e = discord.Embed(
-        title="⚠️ ¿Confirmar eliminación?",
-        description="Esta acción es **permanente e irreversible**.\n¿Deseas eliminar tu **Cédula de Identidad** del Registro Civil de Las Condes RP?",
-        color=0xFF6B00,
+    embed_f = construir_embed_frente(datos, objetivo.display_name, objetivo.display_avatar.url)
+    view    = DNIView(
+        datos=datos,
+        usuario_nombre=objetivo.display_name,
+        discord_avatar_url=str(objetivo.display_avatar.url),
+        owner_id=interaction.user.id
     )
-    if icon:
-        e.set_author(name="Las Condes RP — Registro Civil", icon_url=icon)
-
-    await interaction.response.send_message(embed=e, view=ConfirmarEliminar(), ephemeral=True)
+    view.btn_frente.disabled = True
+    await interaction.response.send_message(embed=embed_f, view=view)
 
 
-@bot.tree.command(name="admin-cedula", description="🔧 [Admin] Elimina la cédula de cualquier usuario")
-@app_commands.describe(usuario="El usuario cuya cédula deseas eliminar")
-@app_commands.checks.has_permissions(administrator=True)
-async def cmd_admin_cedula(interaction: discord.Interaction, usuario: discord.Member):
-    if not get_cedula(usuario.id):
-        await interaction.response.send_message(f"❌ **{usuario.display_name}** no tiene cédula registrada.", ephemeral=True)
+@bot.tree.command(name="actualizar_dni", description="Actualiza tu foto de Roblox si ya tienes cédula registrada")
+@app_commands.describe(nuevo_usuario_roblox="Nuevo nombre de usuario de Roblox")
+async def actualizar_dni(interaction: discord.Interaction, nuevo_usuario_roblox: str):
+    await interaction.response.defer(ephemeral=True)
+    datos = obtener_dni_db(interaction.user.id)
+    if not datos:
+        await interaction.followup.send("❌ No tienes cédula registrada. Usa `/crear_dni` primero.", ephemeral=True)
         return
-    del_cedula(usuario.id)
-    await interaction.response.send_message(f"🗑️ Cédula de **{usuario.display_name}** eliminada del Registro Civil.", ephemeral=True)
+
+    roblox_info = await obtener_info_roblox(nuevo_usuario_roblox)
+    if roblox_info is None:
+        await interaction.followup.send(
+            f"❌ No encontré el usuario **{nuevo_usuario_roblox}** en Roblox.", ephemeral=True
+        )
+        return
+
+    datos["nombre_roblox"]     = nuevo_usuario_roblox
+    datos["roblox_id"]         = str(roblox_info["user_id"])
+    datos["roblox_avatar_url"] = roblox_info["avatar_url"]
+    guardar_dni_db(interaction.user.id, datos)
+
+    embed_f = construir_embed_frente(datos, interaction.user.display_name, interaction.user.display_avatar.url)
+    view    = DNIView(
+        datos=datos,
+        usuario_nombre=interaction.user.display_name,
+        discord_avatar_url=str(interaction.user.display_avatar.url),
+        owner_id=interaction.user.id
+    )
+    view.btn_frente.disabled = True
+    await interaction.followup.send(
+        content=f"✅ ¡Cédula actualizada con el avatar de **{nuevo_usuario_roblox}**!",
+        embed=embed_f, view=view, ephemeral=False
+    )
+
+# ══════════════════════════════════════════════
+#  COMANDOS — SANCIONES
+# ══════════════════════════════════════════════
+
+@bot.tree.command(name="sancionar", description="Aplica una sanción a un miembro del servidor.")
+@app_commands.describe(
+    usuario="Miembro a sancionar", tipo="Tipo de sanción", razon="Razón de la sanción",
+    duracion="Duración (ej: 1d, 3h, 7d) — opcional",
+    prueba="URL de imagen/evidencia — opcional",
+    notificar="¿Notificar al usuario por DM? (por defecto: Sí)",
+)
+@app_commands.choices(tipo=TIPOS_SANCION)
+@app_commands.checks.has_permissions(moderate_members=True)
+async def sancionar(
+    interaction: discord.Interaction,
+    usuario: discord.Member,
+    tipo: app_commands.Choice[str],
+    razon: str,
+    duracion: str = None,
+    prueba: str = None,
+    notificar: bool = True,
+):
+    await interaction.response.defer()
+    if usuario.top_role >= interaction.user.top_role and interaction.user != interaction.guild.owner:
+        await interaction.followup.send(
+            embed=discord.Embed(description="❌ No puedes sancionar a alguien con rol igual o superior.", color=0xE74C3C),
+            ephemeral=True
+        )
+        return
+
+    sid = _new_id()
+    _guardar_sancion(str(interaction.guild_id), str(usuario.id), {
+        "id": sid, "tipo": tipo.value, "razon": razon,
+        "moderador_id": str(interaction.user.id), "fecha": _ahora(),
+        "duracion": duracion, "prueba": prueba, "estado": "activa", "apelacion": None,
+    })
+
+    emoji       = TIPO_EMOJIS.get(tipo.value, "🔴")
+    nombre_tipo = TIPO_NOMBRES.get(tipo.value, tipo.value)
+    total       = len(_obtener_sanciones_usuario(str(interaction.guild_id), str(usuario.id)))
+
+    embed = discord.Embed(title=f"{emoji}  Sanción Aplicada", color=ESTADO_COLORES["activa"], timestamp=datetime.datetime.now(timezone.utc))
+    embed.set_author(name=str(usuario), icon_url=usuario.display_avatar.url)
+    embed.add_field(name="👤 Usuario",         value=usuario.mention,          inline=True)
+    embed.add_field(name="🏷️ Tipo",            value=nombre_tipo,              inline=True)
+    embed.add_field(name="🆔 ID Sanción",      value=f"`{sid}`",               inline=True)
+    embed.add_field(name="📋 Razón",           value=razon,                    inline=False)
+    if duracion:
+        embed.add_field(name="⏱️ Duración",    value=duracion,                 inline=True)
+    embed.add_field(name="🛡️ Moderador",       value=interaction.user.mention, inline=True)
+    embed.add_field(name="📊 Total sanciones", value=f"`{total}`",             inline=True)
+    if prueba:
+        embed.add_field(name="🔗 Evidencia",   value=f"[Ver prueba]({prueba})", inline=False)
+        if prueba.lower().endswith((".png",".jpg",".jpeg",".gif",".webp")) and url_valida(prueba):
+            embed.set_image(url=url_valida(prueba))
+    embed.set_footer(text=f"Servidor: {interaction.guild.name}")
+    await interaction.followup.send(embed=embed)
+
+    if notificar:
+        try:
+            dm = discord.Embed(title=f"{emoji}  Has recibido una sanción", description=f"Has sido sancionado en **{interaction.guild.name}**.", color=ESTADO_COLORES["activa"], timestamp=datetime.datetime.now(timezone.utc))
+            dm.add_field(name="🏷️ Tipo",  value=nombre_tipo, inline=True)
+            dm.add_field(name="🆔 ID",    value=f"`{sid}`",  inline=True)
+            dm.add_field(name="📋 Razón", value=razon,       inline=False)
+            if duracion:
+                dm.add_field(name="⏱️ Duración", value=duracion, inline=True)
+            dm.set_footer(text="Si crees que es injusta, puedes apelarla con /apelar_sancion")
+            await usuario.send(embed=dm)
+        except discord.Forbidden:
+            pass
 
 
-@cmd_admin_cedula.error
-async def admin_error(interaction: discord.Interaction, error):
-    await interaction.response.send_message("⛔ Solo administradores pueden usar este comando.", ephemeral=True)
+@bot.tree.command(name="historial", description="Muestra el historial de sanciones de un miembro.")
+@app_commands.describe(usuario="Miembro a consultar", pagina="Página (por defecto: 1)", filtro="Filtrar por tipo — opcional", solo_activas="Mostrar solo sanciones activas")
+@app_commands.choices(filtro=TIPOS_SANCION)
+@app_commands.checks.has_permissions(moderate_members=True)
+async def historial(interaction: discord.Interaction, usuario: discord.Member, pagina: int = 1, filtro: app_commands.Choice[str] = None, solo_activas: bool = False):
+    await interaction.response.defer(ephemeral=True)
+    sanciones = _obtener_sanciones_usuario(str(interaction.guild_id), str(usuario.id))
+    if filtro:
+        sanciones = [s for s in sanciones if s["tipo"] == filtro.value]
+    if solo_activas:
+        sanciones = [s for s in sanciones if s["estado"] == "activa"]
+    sanciones = sorted(sanciones, key=lambda s: s["fecha"], reverse=True)
+
+    POR_PAG    = 4
+    total      = len(sanciones)
+    total_pags = max(1, (total + POR_PAG - 1) // POR_PAG)
+    pagina     = max(1, min(pagina, total_pags))
+    items      = sanciones[(pagina-1)*POR_PAG: pagina*POR_PAG]
+
+    conteo  = {}
+    for s in sanciones:
+        conteo[s["tipo"]] = conteo.get(s["tipo"], 0) + 1
+    activas  = sum(1 for s in sanciones if s["estado"] == "activa")
+    apeladas = sum(1 for s in sanciones if s["estado"] == "apelada")
+
+    embed = discord.Embed(title="📂  Historial de Sanciones", color=0x2F3136, timestamp=datetime.datetime.now(timezone.utc))
+    embed.set_author(name=f"{usuario} — {total} sanción(es) total", icon_url=usuario.display_avatar.url)
+    resumen = "\n".join(f"{TIPO_EMOJIS.get(t,'•')} {TIPO_NOMBRES.get(t,t)}: **{c}**" for t,c in conteo.items()) or "Sin registros."
+    embed.add_field(name="📊 Resumen", value=resumen, inline=True)
+    embed.add_field(name="📌 Estado",  value=f"🔴 Activas: **{activas}**\n🟠 Apeladas: **{apeladas}**", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=False)
+    if not items:
+        embed.add_field(name="Sin resultados", value="No hay sanciones con ese filtro.", inline=False)
+    else:
+        for s in items:
+            emoji       = TIPO_EMOJIS.get(s["tipo"],"🔴")
+            nombre_tipo = TIPO_NOMBRES.get(s["tipo"],s["tipo"])
+            estado_badge = {"activa":"🔴 Activa","apelada":"🟠 Apelada","inactiva":"⚫ Inactiva"}.get(s.get("estado","activa"),s.get("estado","activa"))
+            linea = f"**Razón:** {s['razon']}\n**Moderador:** <@{s['moderador_id']}> · **Fecha:** {_ts(s['fecha'])}\n**Estado:** {estado_badge}"
+            if s.get("duracion"):   linea += f" · **Duración:** {s['duracion']}"
+            if s.get("apelacion"):  linea += f"\n**Apelación:** {s['apelacion']}"
+            embed.add_field(name=f"{emoji} [{s['id']}] {nombre_tipo}", value=linea, inline=False)
+    embed.set_footer(text=f"Página {pagina}/{total_pags} · {interaction.guild.name}")
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-# ═════════════════════════════════════════════════════════════════════════
-#  ARRANQUE
-# ═════════════════════════════════════════════════════════════════════════
+@bot.tree.command(name="apelar_sancion", description="Apela una sanción.")
+@app_commands.describe(usuario="Miembro cuya sanción se apela", sancion_id="ID de la sanción", motivo="Motivo de la apelación")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def apelar_sancion(interaction: discord.Interaction, usuario: discord.Member, sancion_id: str, motivo: str):
+    await interaction.response.defer(ephemeral=True)
+    sancion_id = sancion_id.upper().strip()
+    sanciones  = _obtener_sanciones_usuario(str(interaction.guild_id), str(usuario.id))
+    sancion    = next((s for s in sanciones if s["id"] == sancion_id), None)
+    if not sancion:
+        await interaction.followup.send(embed=discord.Embed(description=f"❌ No encontré la sanción `{sancion_id}`.", color=0xE74C3C), ephemeral=True)
+        return
+    if sancion["estado"] == "apelada":
+        await interaction.followup.send(embed=discord.Embed(description=f"⚠️ La sanción `{sancion_id}` ya fue apelada.", color=0xF39C12), ephemeral=True)
+        return
+    _actualizar_sancion(str(interaction.guild_id), str(usuario.id), sancion_id, {"estado": "apelada", "apelacion": motivo, "apelado_por": str(interaction.user.id), "fecha_apelacion": _ahora()})
+    emoji       = TIPO_EMOJIS.get(sancion["tipo"],"🔴")
+    nombre_tipo = TIPO_NOMBRES.get(sancion["tipo"],sancion["tipo"])
+    embed = discord.Embed(title="🟠  Sanción Apelada", description="La sanción queda registrada como **apelada**.", color=0xF39C12, timestamp=datetime.datetime.now(timezone.utc))
+    embed.set_author(name=str(usuario), icon_url=usuario.display_avatar.url)
+    embed.add_field(name="🆔 ID",               value=f"`{sancion_id}`",        inline=True)
+    embed.add_field(name="🏷️ Tipo",             value=f"{emoji} {nombre_tipo}", inline=True)
+    embed.add_field(name="📋 Razón original",   value=sancion["razon"],          inline=False)
+    embed.add_field(name="📝 Motivo apelación", value=motivo,                    inline=False)
+    embed.add_field(name="🛡️ Apelado por",      value=interaction.user.mention, inline=True)
+    embed.set_footer(text=f"Servidor: {interaction.guild.name}")
+    await interaction.followup.send(embed=embed)
+    try:
+        dm = discord.Embed(title="🟠  Tu sanción ha sido apelada", description=f"Una de tus sanciones en **{interaction.guild.name}** fue marcada como apelada.", color=0xF39C12)
+        dm.add_field(name="🆔 ID",    value=f"`{sancion_id}`", inline=True)
+        dm.add_field(name="🏷️ Tipo",  value=nombre_tipo,       inline=True)
+        dm.add_field(name="📝 Motivo",value=motivo,            inline=False)
+        await usuario.send(embed=dm)
+    except discord.Forbidden:
+        pass
 
-if __name__ == "__main__":
-    keep_alive()
-    bot.run(TOKEN)
+
+@bot.tree.command(name="borrar_sancion", description="Elimina permanentemente una sanción del historial.")
+@app_commands.describe(usuario="Miembro al que se le borra la sanción", sancion_id="ID de la sanción", motivo="Razón para borrarla")
+@app_commands.checks.has_permissions(administrator=True)
+async def borrar_sancion(interaction: discord.Interaction, usuario: discord.Member, sancion_id: str, motivo: str):
+    await interaction.response.defer(ephemeral=True)
+    sancion_id = sancion_id.upper().strip()
+    sanciones  = _obtener_sanciones_usuario(str(interaction.guild_id), str(usuario.id))
+    sancion    = next((s for s in sanciones if s["id"] == sancion_id), None)
+    if not sancion:
+        await interaction.followup.send(embed=discord.Embed(description=f"❌ No encontré la sanción `{sancion_id}`.", color=0xE74C3C), ephemeral=True)
+        return
+    emoji       = TIPO_EMOJIS.get(sancion["tipo"],"🔴")
+    nombre_tipo = TIPO_NOMBRES.get(sancion["tipo"],sancion["tipo"])
+    confirm_embed = discord.Embed(title="🗑️  Confirmar eliminación", description="¿Seguro que quieres **borrar permanentemente** esta sanción?\nEsta acción **no se puede deshacer**.", color=0xE74C3C)
+    confirm_embed.add_field(name="🆔 ID",             value=f"`{sancion_id}`",        inline=True)
+    confirm_embed.add_field(name="🏷️ Tipo",           value=f"{emoji} {nombre_tipo}", inline=True)
+    confirm_embed.add_field(name="📋 Razón",          value=sancion["razon"],         inline=False)
+    confirm_embed.add_field(name="📝 Motivo borrado", value=motivo,                   inline=False)
+    view = ConfirmarBorrado(interaction=interaction, guild_id=str(interaction.guild_id), user_id=str(usuario.id), sancion_id=sancion_id, usuario=usuario, sancion=sancion, motivo=motivo)
+    await interaction.followup.send(embed=confirm_embed, view=view, ephemeral=True)
+
+# ══════════════════════════════════════════════
+#  COMANDOS — ANUNCIO
+# ══════════════════════════════════════════════
+
+TIPO_CONFIG_ANUNCIO = {
+    "informacion_general": {"emoji": "📢", "color": 0x3498DB,   "label": "Información General",               "footer": "La Zona Roja RP — Información"},
+    "informacion_staff":   {"emoji": "🛡️", "color": 0x8E44AD,   "label": "Información para el Staff",         "footer": "La Zona Roja RP — Staff Interno"},
+    "normativa":           {"emoji": "📋", "color": COLOR_MARCA, "label": "Normativa Oficial",                 "footer": "La Zona Roja RP — Normativa"},
+    "evento":              {"emoji": "🎉", "color": 0xF39C12,   "label": "Evento",                            "footer": "La Zona Roja RP — Eventos"},
+    "actualizacion":       {"emoji": "🔧", "color": 0x2ECC71,   "label": "Actualización del Servidor",        "footer": "La Zona Roja RP — Actualizaciones"},
+    "alerta":              {"emoji": "⚠️", "color": 0xE74C3C,   "label": "Alerta Importante",                 "footer": "La Zona Roja RP — Alertas"},
+    "economia":            {"emoji": "🏦", "color": 0x27AE60,   "label": "Economía",                          "footer": "La Zona Roja RP — Economía"},
+    "reclutamiento":       {"emoji": "📝", "color": 0x1ABC9C,   "label": "Reclutamiento de Staff",            "footer": "La Zona Roja RP — Reclutamiento"},
+}
+
+@bot.tree.command(name="anuncio", description="Publica un anuncio oficial en el canal que elijas.")
+@app_commands.describe(tipo="Tipo de anuncio", canal="Canal donde se publicará", titulo="Título del anuncio", descripcion="Contenido del anuncio", ping="A quién mencionar", imagen="URL de imagen (opcional)")
+@app_commands.choices(
+    tipo=[
+        app_commands.Choice(name="📢  Información General",        value="informacion_general"),
+        app_commands.Choice(name="🛡️  Información para el Staff",  value="informacion_staff"),
+        app_commands.Choice(name="📋  Normativa Oficial",          value="normativa"),
+        app_commands.Choice(name="🎉  Evento",                     value="evento"),
+        app_commands.Choice(name="🔧  Actualización del Servidor", value="actualizacion"),
+        app_commands.Choice(name="⚠️  Alerta Importante",          value="alerta"),
+        app_commands.Choice(name="🏦  Economía",                   value="economia"),
+        app_commands.Choice(name="📝  Reclutamiento de Staff",     value="reclutamiento"),
+    ],
+    ping=[
+        app_commands.Choice(name="🔕  Sin mención", value="ninguno"),
+        app_commands.Choice(name="📣  @everyone",   value="everyone"),
+        app_commands.Choice(name="🟢  @here",       value="here"),
+        app_commands.Choice(name="🛡️  @Staff",      value="staff"),
+    ],
+)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def anuncio(interaction: discord.Interaction, tipo: app_commands.Choice[str], canal: discord.TextChannel, titulo: str, descripcion: str, ping: app_commands.Choice[str], imagen: str = None):
+    await interaction.response.defer(ephemeral=True)
+    cfg = TIPO_CONFIG_ANUNCIO.get(tipo.value, TIPO_CONFIG_ANUNCIO["informacion_general"])
+    embed = discord.Embed(title=f"{cfg['emoji']}  {titulo}", description=descripcion, color=cfg["color"], timestamp=datetime.datetime.now(timezone.utc))
+    embed.set_author(name=f"La Zona Roja RP — {cfg['label']}", icon_url=url_valida(LOGO_URL))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    if url_valida(imagen):
+        embed.set_image(url=url_valida(imagen))
+    embed.set_footer(text=f"{cfg['footer']} • Publicado por {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+    ping_texto = None
+    if ping.value == "everyone":   ping_texto = "@everyone"
+    elif ping.value == "here":     ping_texto = "@here"
+    elif ping.value == "staff":
+        rol_staff  = discord.utils.get(interaction.guild.roles, name="Staff")
+        ping_texto = rol_staff.mention if rol_staff else None
+    await canal.send(content=ping_texto, embed=embed)
+    await interaction.followup.send(embed=discord.Embed(description=f"✅ Anuncio publicado en {canal.mention}", color=0x2ECC71), ephemeral=True)
+
+# ══════════════════════════════════════════════
+#  COMANDOS — SESIÓN
+# ══════════════════════════════════════════════
+
+@bot.tree.command(name="abrir_servidor", description="Anuncio oficial de apertura del servidor")
+@app_commands.describe(horario_cierre="¿A qué hora cierra el servidor?", modo="Modo de roleplay de la sesión")
+@app_commands.choices(modo=[
+    app_commands.Choice(name="🟢 Modo Normal",     value="🟢 Normal"),
+    app_commands.Choice(name="🟡 Modo Evento",     value="🟡 Evento Especial"),
+    app_commands.Choice(name="🔴 Modo Emergencia", value="🔴 Emergencia Activa"),
+])
+@app_commands.checks.has_permissions(manage_messages=True)
+async def abrir(interaction: discord.Interaction, horario_cierre: str, modo: str = "🟢 Normal"):
+    embed = discord.Embed(title="✨ ¡SERVIDOR ABIERTO! ✨", description="La sesión de roleplay ha comenzado oficialmente.\n¡Bienvenidos a **La Zona Roja RP**! 🇨🇱", color=0x2ecc71)
+    embed.add_field(name="🆔 CÓDIGO",          value="`LZRRP`",                         inline=True)
+    embed.add_field(name="🕒 CIERRE ESTIMADO", value=f"**{horario_cierre}**",            inline=True)
+    embed.add_field(name="🎮 MODO DE SESIÓN",  value=modo,                               inline=True)
+    embed.add_field(name="🎙️ HOST DE SESIÓN", value=interaction.user.mention,           inline=True)
+    embed.add_field(name="📅 FECHA",           value=f"<t:{int(time.time())}:D>",        inline=True)
+    embed.add_field(name="⏱️ INICIO",          value=f"<t:{int(time.time())}:t>",        inline=True)
+    embed.add_field(name="📢 RECUERDA", value="▸ Sigue el reglamento en todo momento.\n▸ Respeta a los demás jugadores.\n▸ Mantén el rol activo y de calidad.", inline=False)
+    embed.set_image(url=url_valida(IMG_APERTURA))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="LZRRP System • La Zona Roja RP", icon_url=url_valida(LOGO_URL))
+    await interaction.response.send_message(content="@everyone", embed=embed)
+
+
+@bot.tree.command(name="cerrar_servidor", description="Anuncio oficial de cierre del servidor")
+@app_commands.describe(motivo="Motivo del cierre (opcional)")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def cerrar(interaction: discord.Interaction, motivo: str = "Fin de sesión normal."):
+    embed = discord.Embed(title="⛔ SERVIDOR CERRADO ⛔", description="La sesión de roleplay ha finalizado.\n¡Gracias por participar en **La Zona Roja RP**! 🇨🇱", color=0xe74c3c)
+    embed.add_field(name="🌐 ESTADO",         value="🔴 OFFLINE",                 inline=True)
+    embed.add_field(name="⚒️ CERRADO POR",    value=interaction.user.mention,     inline=True)
+    embed.add_field(name="⏱️ HORA DE CIERRE", value=f"<t:{int(time.time())}:t>", inline=True)
+    embed.add_field(name="📝 MOTIVO",         value=motivo,                       inline=False)
+    embed.add_field(name="📌 INFO", value="▸ Guardamos tu progreso automáticamente.\n▸ ¡Vuelve pronto para la próxima sesión!", inline=False)
+    embed.set_image(url=url_valida(IMG_CIERRE))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="LZRRP System • La Zona Roja RP", icon_url=url_valida(LOGO_URL))
+    await interaction.response.send_message(content="@everyone", embed=embed)
+
+
+@bot.tree.command(name="pausar_servidor", description="Pausa temporal la sesión")
+@app_commands.describe(duracion="¿Cuánto dura la pausa?", motivo="¿Por qué se pausa?")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def pausar(interaction: discord.Interaction, duracion: str, motivo: str = "Descanso."):
+    embed = discord.Embed(title="⏸️ SERVIDOR EN PAUSA", description="La sesión ha sido pausada temporalmente.", color=0xf39c12)
+    embed.add_field(name="⏱️ DURACIÓN ESTIMADA", value=f"**{duracion}**",        inline=True)
+    embed.add_field(name="📝 MOTIVO",             value=motivo,                  inline=True)
+    embed.add_field(name="🎙️ PAUSADO POR",        value=interaction.user.mention,inline=True)
+    embed.add_field(name="💡 MIENTRAS TANTO", value="▸ Puedes usar los canales de OOC.\n▸ No abandones el servidor.\n▸ Espera el aviso de reanudación.", inline=False)
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="LZRRP System • La Zona Roja RP", icon_url=url_valida(LOGO_URL))
+    await interaction.response.send_message(content="@everyone", embed=embed)
+
+
+@bot.tree.command(name="reanudar_servidor", description="Reanuda la sesión tras una pausa")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def reanudar(interaction: discord.Interaction):
+    embed = discord.Embed(title="▶️ ¡SESIÓN REANUDADA!", description="¡Volvemos al roleplay en **La Zona Roja RP**! 🇨🇱", color=0x1abc9c)
+    embed.add_field(name="🕒 HORA DE REANUDACIÓN", value=f"<t:{int(time.time())}:t>", inline=True)
+    embed.add_field(name="🎙️ REANUDADO POR",       value=interaction.user.mention,    inline=True)
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="LZRRP System • La Zona Roja RP", icon_url=url_valida(LOGO_URL))
+    await interaction.response.send_message(content="@everyone", embed=embed)
+
+
+@bot.tree.command(name="emergencia", description="Alerta de emergencia o situación crítica en el rol")
+@app_commands.describe(tipo="Tipo de emergencia", descripcion="Descripción breve de la emergencia")
+@app_commands.choices(tipo=[
+    app_commands.Choice(name="🚒 Incendio",             value="🚒 Incendio"),
+    app_commands.Choice(name="🚑 Emergencia Médica",    value="🚑 Emergencia Médica"),
+    app_commands.Choice(name="🚔 Persecución Policial", value="🚔 Persecución Policial"),
+    app_commands.Choice(name="💥 Desastre Natural",     value="💥 Desastre Natural"),
+    app_commands.Choice(name="⚠️ Alerta General",       value="⚠️ Alerta General"),
+])
+@app_commands.checks.has_permissions(manage_messages=True)
+async def emergencia(interaction: discord.Interaction, tipo: str, descripcion: str):
+    embed = discord.Embed(title=f"🚨 EMERGENCIA ACTIVA — {tipo}", description=f"**{descripcion}**", color=0xff0000)
+    embed.add_field(name="⏱️ HORA",          value=f"<t:{int(time.time())}:t>", inline=True)
+    embed.add_field(name="📣 REPORTADO POR", value=interaction.user.mention,    inline=True)
+    embed.add_field(name="🆘 INSTRUCCIONES", value="▸ Todos los servicios de emergencia al lugar.\n▸ Ciudadanos: manténganse alejados.\n▸ Sigan las instrucciones de los oficiales.", inline=False)
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="LZRRP System • La Zona Roja RP", icon_url=url_valida(LOGO_URL))
+    await interaction.response.send_message(content="@everyone 🚨", embed=embed)
+
+
+@bot.tree.command(name="evento_especial", description="Anuncia un evento especial en el servidor")
+@app_commands.describe(nombre="Nombre del evento", descripcion="Descripción del evento", hora="Hora del evento", premio="Premio o recompensa (opcional)")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def evento(interaction: discord.Interaction, nombre: str, descripcion: str, hora: str, premio: str = "Sin premio definido."):
+    embed = discord.Embed(title=f"🎉 EVENTO ESPECIAL — {nombre}", description=descripcion, color=0x9b59b6)
+    embed.add_field(name="🕒 HORA DEL EVENTO",     value=f"**{hora}**",               inline=True)
+    embed.add_field(name="📅 FECHA",               value=f"<t:{int(time.time())}:D>", inline=True)
+    embed.add_field(name="🎙️ ORGANIZADO POR",     value=interaction.user.mention,    inline=True)
+    embed.add_field(name="🏆 PREMIO / RECOMPENSA", value=premio,                      inline=False)
+    embed.add_field(name="📌 PARTICIPA", value="▸ Preséntate a tiempo.\n▸ Sigue las reglas del evento.\n▸ ¡Diviértete!", inline=False)
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="LZRRP System • La Zona Roja RP", icon_url=url_valida(LOGO_URL))
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="✅ ¡Me anoto!", style=discord.ButtonStyle.success, custom_id="evento_anotarse", disabled=True))
+    await interaction.response.send_message(content="@everyone 🎉", embed=embed, view=view)
+
+
+@bot.tree.command(name="votar_apertura", description="Votación para abrir sesión")
+@app_commands.describe(hora_propuesta="Hora propuesta para abrir (ej: 20:00)")
+async def votar(interaction: discord.Interaction, hora_propuesta: str = "Por definir"):
+    embed = discord.Embed(title="📊 ¿ABRIMOS SESIÓN?", description=f"**Hora propuesta:** `{hora_propuesta}`\n\nVota con las reacciones.\n✅ Sí, quiero jugar · ❌ No puedo hoy", color=COLOR_MARCA)
+    embed.add_field(name="🎙️ PROPUESTO POR", value=interaction.user.mention, inline=True)
+    embed.add_field(name="🌐 SERVIDOR",       value="La Zona Roja RP 🇨🇱",   inline=True)
+    embed.set_image(url=url_valida(IMG_ENCUESTA))
+    embed.set_thumbnail(url=url_valida(LOGO_URL))
+    embed.set_footer(text="LZRRP System • La Zona Roja RP", icon_url=url_valida(LOGO_URL))
+    await interaction.response.send_message(embed=embed)
+    msg = await interaction.original_response()
+    await msg.add_reaction("✅")
+    await msg.add_reaction("❌")
+
+# ══════════════════════════════════════════════
+#  INICIO
+# ══════════════════════════════════════════════
+keep_alive()
+bot.run(os.environ.get('TOKEN'))
